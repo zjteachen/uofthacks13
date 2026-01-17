@@ -1,16 +1,10 @@
-import OpenAI from "openai";
-
-// OpenAI API Configuration
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
-
 // Store the current textarea being monitored
 let currentTextarea = null;
 let approvedMessages = new Set();
 let currentSendButton = null;
 let currentForm = null;
+
+console.log("Privacy Guard: Content script loaded on", window.location.hostname);
 
 // Fetch the selected identity from chrome storage
 async function getSelectedIdentity() {
@@ -47,212 +41,52 @@ function extractChatHistory() {
   return messages;
 }
 
-// Build the system prompt based on whether we have identity context
-function buildDetectionPrompt(identity, chatHistory) {
-  // If identity exists, use context-aware detection
-  console.log("Literally pissing");
-  if (
-    identity &&
-    identity.characteristics &&
-    identity.characteristics.length > 0
-  ) {
-    const characteristicsList = identity.characteristics
-      .map((c) => `- ${c.name}: ${c.value}`)
-      .join("\n");
-    console.log(characteristicsList);
-
-    const chatHistorySummary =
-      chatHistory.length > 0
-        ? chatHistory
-            .map(
-              (m) =>
-                `${m.role}: ${m.content.substring(0, 200)}${m.content.length > 200 ? "..." : ""}`,
-            )
-            .join("\n")
-        : "No previous messages in this conversation.";
-
-    return `You are a privacy protection assistant. The user has a privacy profile that defines what personal information they're comfortable sharing in this context.
-
-PRIVACY PROFILE: "${identity.name}"
-Allowed information to share:
-${characteristicsList}
-
-CHAT HISTORY (what's already been shared in this conversation):
-${chatHistorySummary}
-
-Your task: Flag ONLY information that reveals MORE about the user than what's defined in their allowed characteristics OR what they've already shared in this conversation.
-
-Rules:
-1. Information matching the profile's characteristics is ALLOWED (e.g., if "Name: Alex" is in characteristics, mentioning "Alex" is fine)
-2. More specific information than what's in the profile should be flagged (e.g., if profile has "Location: Canada", mentioning "Toronto" should be flagged as more specific)
-3. If something was already shared in the chat history, don't flag it again
-4. Focus on information ESCALATION - what's new and more revealing than the profile allows
-5. Information not covered by any characteristic should be flagged (e.g., if no email in profile, any email should be flagged)
-
-Return a JSON array. Each item must have:
-- "text": the exact phrase/word that reveals information
-- "type": "location", "personal_detail", "identifier", "contact_info", etc.
-- "reason": clear explanation of what this reveals beyond the allowed profile
-- "severity": "high" (direct identifiers not in profile), "medium" (more specific than profile), "low" (weak clues)
-
-Return ONLY the JSON array, nothing else. Return [] if the message stays within the bounds of the allowed characteristics.`;
-  }
-
-  // Fallback: no identity - flag all personal info (original behavior)
-  return `You are a highly sensitive privacy protection assistant. Your job is to catch ALL information that could reveal someone's identity or location, including subtle hints and contextual clues.
-
-IMPORTANT: Be extremely cautious. If something MIGHT reveal private information, flag it.
-
-Categories to detect:
-
-1. Direct identifiers: names, emails, phone numbers, addresses, SSN, credit cards, government IDs
-2. Location clues (BE VERY SENSITIVE):
-   - Specific cities, states, countries
-   - Universities, schools, workplaces
-   - Neighborhoods, landmarks, buildings
-   - Colloquial references like "land of spices" (India), "Big Apple" (NYC), "Down Under" (Australia)
-   - Cultural references that reveal location (e.g., "where I study" + "UofT" = Toronto)
-3. Personal details: age, job titles, company names, family member names, medical conditions, ethnicity
-4. Identifying patterns: specific routines, unique events with dates, combinations of facts
-5. Digital identifiers: usernames, IP addresses, account numbers, device IDs, social media handles
-6. Temporal information: specific dates of personal events, birthdays, anniversaries
-7. Financial information: salary, account balances, transactions, financial institutions
-8. Relationships: names of friends, family, colleagues, romantic partners
-9. Cultural/contextual clues: phrases that imply location, background, or identity
-
-Return a JSON array. Each item must have:
-- "text": the exact phrase/word that reveals information
-- "type": "location", "personal_detail", "identifier", "contact_info", etc.
-- "reason": clear explanation of what this reveals and why it's sensitive
-- "severity": "high" (direct identifiers), "medium" (strong contextual clues), "low" (weak clues)
-
-CRITICAL: If you're unsure whether something is sensitive, FLAG IT ANYWAY. Better safe than sorry.
-
-Return ONLY the JSON array, nothing else. If truly nothing sensitive, return []`;
-}
-
-// Detect personal information using AI
+// Detect personal information using AI (via background service worker)
 async function detectPersonalInfoWithAI(
   text,
   identity = null,
   chatHistory = [],
 ) {
-  try {
-    console.log(
-      "Privacy Guard: Starting AI detection for text:",
-      text.substring(0, 50) + "...",
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "detectPersonalInfo",
+        text,
+        identity,
+        chatHistory,
+      },
+      (response) => {
+        if (response.success) {
+          resolve(response.data);
+        } else {
+          console.error("Privacy Guard: AI detection error:", response.error);
+          resolve([]);
+        }
+      }
     );
-    console.log(
-      "Privacy Guard: Identity context:",
-      identity ? identity.name : "none",
-    );
-    console.log("Privacy Guard: Chat history messages:", chatHistory.length);
-
-    const systemPrompt = buildDetectionPrompt(identity, chatHistory);
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt,
-        },
-        {
-          role: "user",
-          content: text,
-        },
-      ],
-      temperature: 0.2,
-      max_tokens: 1500,
-    });
-
-    const content = completion.choices[0].message.content.trim();
-
-    console.log("Privacy Guard: AI response:", content);
-
-    // Parse the JSON response
-    let detected = [];
-    try {
-      // Remove markdown code blocks if present
-      const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
-      detected = JSON.parse(jsonContent);
-      console.log("Privacy Guard: AI detected", detected.length, "items");
-    } catch (e) {
-      console.error("Privacy Guard: Failed to parse AI response:", e);
-      detected = [];
-    }
-
-    return detected;
-  } catch (error) {
-    console.error("Privacy Guard: AI detection error:", error);
-    return [];
-  }
+  });
 }
 
-// Rewrite message to remove sensitive information
+// Rewrite message to remove sensitive information (via background service worker)
 async function rewriteMessage(originalText, itemsToRemove, identity = null) {
-  try {
-    // Build context about what's allowed if we have an identity
-    let identityContext = "";
-    if (
-      identity &&
-      identity.characteristics &&
-      identity.characteristics.length > 0
-    ) {
-      const allowedInfo = identity.characteristics
-        .map((c) => `${c.name}: ${c.value}`)
-        .join(", ");
-      identityContext = `\n\nIMPORTANT: The user has a privacy profile allowing these details: ${allowedInfo}. When rewriting, you may keep information that matches these allowed characteristics, but remove or generalize the flagged items that go beyond what's allowed.`;
-    }
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are a privacy protection assistant. Rewrite the user's message to remove or anonymize the specified sensitive information while maintaining the core meaning and intent of the message.
-
-CRITICAL RULES:
-1. NEVER use placeholders like [name], [location], [redacted], etc.
-2. Either omit the sensitive information entirely or replace it with natural, generic terms
-3. Make the message flow naturally without obvious gaps
-4. Replace specific locations with general terms (e.g., "from India" → "from South Asia" or just remove it)
-5. Remove or generalize personal identifiers completely
-6. Keep the message natural and conversational
-7. Maintain the original tone and style
-8. If removing something makes the sentence awkward, rephrase the entire sentence naturally
-
-Examples:
-- "Hi, I'm John from Toronto" → "Hi, I'm someone from Canada" or "Hi there"
-- "My name is Sarah" → "I'm a person" or just start the message differently
-- "I live in the land of spices" → "I live in a warm country" or just remove
-${identityContext}
-Return ONLY the rewritten message text, nothing else.`,
-        },
-        {
-          role: "user",
-          content: `Original message: "${originalText}"\n\nRemove these sensitive items:\n${itemsToRemove.map((item, idx) => `${idx + 1}. "${item.text}" (${item.reason})`).join("\n")}`,
-        },
-      ],
-      temperature: 0.5,
-      max_tokens: 1000,
-    });
-
-    let rewrittenText = completion.choices[0].message.content.trim();
-
-    // Remove surrounding quotes if present
-    if (
-      (rewrittenText.startsWith('"') && rewrittenText.endsWith('"')) ||
-      (rewrittenText.startsWith("'") && rewrittenText.endsWith("'"))
-    ) {
-      rewrittenText = rewrittenText.slice(1, -1);
-    }
-
-    return rewrittenText;
-  } catch (error) {
-    console.error("Rewrite error:", error);
-    return originalText;
-  }
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "rewriteMessage",
+        text: originalText,
+        itemsToRemove,
+        identity,
+      },
+      (response) => {
+        if (response.success) {
+          resolve(response.data);
+        } else {
+          console.error("Privacy Guard: Rewrite error:", response.error);
+          reject(new Error(response.error));
+        }
+      }
+    );
+  });
 }
 
 // Create warning modal with AI-detected items
@@ -781,18 +615,30 @@ function monitorChatGPTInput() {
 
   // Find the textarea - ChatGPT uses a contenteditable div or textarea
   const findInput = () => {
-    // Try multiple selectors as ChatGPT's DOM structure may vary
+    // Try multiple selectors as ChatGPT and Gemini have different DOM structures
     const selectors = [
+      // ChatGPT selectors (priority)
       "textarea[data-id]",
       "#prompt-textarea",
+      
+      // Gemini selectors (priority)
+      "div[contenteditable='true'][data-testid*='message']",
+      "div[data-inner-editor-container]",
+      
+      // Generic selectors (works for both)
+      'textarea[aria-label*="message"]',
+      'textarea[placeholder*="Message"]',
+      'textarea[placeholder*="message"]',
+      "textarea[contenteditable='true']",
       "textarea",
+      '[contenteditable="true"][role="textbox"]',
       '[contenteditable="true"]',
       'div[contenteditable="true"]',
     ];
 
     for (const selector of selectors) {
       const el = document.querySelector(selector);
-      if (el) {
+      if (el && el.offsetParent !== null) { // Also check if visible
         console.log("Privacy Guard: Found input with selector:", selector);
         return el;
       }
@@ -859,20 +705,38 @@ function monitorChatGPTInput() {
 
     // Method 3: Monitor the send button
     const findSendButton = () => {
+      // Gemini uses .send-button class - try this first
+      const geminiSendBtn = document.querySelector("button.send-button");
+      if (geminiSendBtn && geminiSendBtn.offsetParent !== null) {
+        console.log("Privacy Guard: Found Gemini send button with .send-button class");
+        return geminiSendBtn;
+      }
+      
       const buttons = document.querySelectorAll("button");
       for (const btn of buttons) {
         const hasDataTestId = btn.getAttribute("data-testid") === "send-button";
         const hasSvg = btn.querySelector("svg");
-        const isAriaLabel = btn
-          .getAttribute("aria-label")
-          ?.toLowerCase()
-          .includes("send");
-
+        const hasMatIcon = btn.querySelector("mat-icon");
+        const ariaLabel = btn.getAttribute("aria-label") || "";
+        const title = btn.getAttribute("title") || "";
+        
+        // Check various send button indicators
+        const isAriaLabel = ariaLabel.toLowerCase().includes("send");
+        const isTitle = title.toLowerCase().includes("send");
+        const isVisible = btn.offsetParent !== null; // Not hidden
+        const hasIcon = (hasSvg || hasMatIcon) && btn.textContent.trim() === "";
+        
+        // Gemini: Look for button with icon near textarea
+        const nearTextarea = input && input.parentElement?.contains(btn);
+        
         if (
           hasDataTestId ||
-          (hasSvg && btn.textContent.trim() === "") ||
-          isAriaLabel
+          (hasIcon && isVisible) ||
+          isAriaLabel ||
+          isTitle ||
+          (nearTextarea && isVisible && (hasSvg || hasMatIcon))
         ) {
+          console.log("Privacy Guard: Send button candidate found with aria-label:", ariaLabel, "title:", title, "hasIcon:", hasIcon);
           return btn;
         }
       }
@@ -887,18 +751,38 @@ function monitorChatGPTInput() {
         "click",
         async (e) => {
           console.log("Privacy Guard: Send button clicked");
+          
+          // Check if message is already approved (from rewrite)
+          const text = currentTextarea.value || currentTextarea.textContent || "";
+          const textHash = hashString(text);
+          
+          if (approvedMessages.has(textHash)) {
+            console.log("Privacy Guard: Message already approved, allowing click to proceed");
+            return; // Let the original click happen
+          }
+          
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
 
-          const result = await interceptSubmission(input, true);
+          const result = await interceptSubmission(currentTextarea, true);
 
           if (!result.proceed) {
+            console.log("Privacy Guard: User cancelled, not submitting");
             return false;
           }
+          
+          console.log("Privacy Guard: User approved, now actually submitting");
+          // The message text may have been rewritten, but we still need to click the button
+          // Actually click the send button for real this time
+          setTimeout(() => {
+            sendButton.click();
+          }, 100);
         },
         true,
       );
+    } else {
+      console.log("Privacy Guard: Send button not found");
     }
   };
 
