@@ -10,9 +10,21 @@ function Options() {
 
   useEffect(() => {
     // Load identities from Chrome storage
-    chrome.storage.sync.get(['identities', 'selectedId'], (result: any) => {
-      if (result.identities) {
-        setIdentities(result.identities);
+    chrome.storage.sync.get(['identities', 'selectedId'], async (result: any) => {
+      if (result.identities && Array.isArray(result.identities)) {
+        // Load profile pictures from local storage
+        const identitiesWithImages = await Promise.all(
+          result.identities.map(async (identity: any) => {
+            const imageData = await chrome.storage.local.get(`image_${identity.id}`);
+            return {
+              ...identity,
+              profilePicture: imageData[`image_${identity.id}`] || '',
+              textSetting: identity.textSetting || '',
+              prompt: identity.prompt || ''
+            };
+          })
+        );
+        setIdentities(identitiesWithImages);
         setSelectedId(result.selectedId);
       }
     });
@@ -57,7 +69,28 @@ function Options() {
       i.id === updatedIdentity.id ? updatedIdentity : i
     );
     setIdentities(updatedIdentities);
-    saveToStorage(updatedIdentities, selectedId);
+
+    // Save image separately to local storage
+    if (updatedIdentity.profilePicture) {
+      chrome.storage.local.set({
+        [`image_${updatedIdentity.id}`]: updatedIdentity.profilePicture
+      });
+    }
+
+    // Save metadata to sync storage (without large image data)
+    const identitiesForSync = updatedIdentities.map(({ profilePicture, ...rest }) => ({
+      ...rest,
+      profilePicture: '' // Empty string to match Identity interface
+    }));
+    
+    chrome.storage.sync.set({
+      identities: identitiesForSync,
+      selectedId: selectedId
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Failed to save identity:', chrome.runtime.lastError);
+      }
+    });
   };
 
   const handleNameChange = (name: string) => {
@@ -73,6 +106,10 @@ function Options() {
     chrome.storage.sync.set({
       identities: ids,
       selectedId: selected
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Failed to save to storage:', chrome.runtime.lastError);
+      }
     });
   };
 

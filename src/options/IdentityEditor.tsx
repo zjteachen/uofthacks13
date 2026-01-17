@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Identity } from '../types/identity';
 import './IdentityEditor.css';
 
@@ -15,13 +15,53 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
   const [prompt, setPrompt] = useState(identity?.prompt || '');
   const [saveStatus, setSaveStatus] = useState('');
 
+  // Update state when identity prop changes
+  useEffect(() => {
+    if (identity) {
+      setTempName(identity.name);
+      setProfilePicture(identity.profilePicture);
+      setTextSetting(identity.textSetting);
+      setPrompt(identity.prompt);
+    }
+  }, [identity?.id]);
+
   const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
         const base64 = event.target?.result as string;
-        setProfilePicture(base64);
+        // Compress the image
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          
+          // Limit max dimension to 200px
+          const maxDim = 200;
+          if (width > height) {
+            if (width > maxDim) {
+              height = (height * maxDim) / width;
+              width = maxDim;
+            }
+          } else {
+            if (height > maxDim) {
+              width = (width * maxDim) / height;
+              height = maxDim;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL('image/jpeg', 0.7);
+            setProfilePicture(compressed);
+          }
+        };
+        img.src = base64;
       };
       reader.readAsDataURL(file);
     }
