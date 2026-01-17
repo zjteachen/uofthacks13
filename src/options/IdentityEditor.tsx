@@ -11,7 +11,6 @@ interface IdentityEditorProps {
 function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps) {
   const [tempName, setTempName] = useState(identity?.name || '');
   const [profilePicture, setProfilePicture] = useState(identity?.profilePicture || '');
-  const [textSetting, setTextSetting] = useState(identity?.textSetting || '');
   const [prompt, setPrompt] = useState(identity?.prompt || '');
   const [saveStatus, setSaveStatus] = useState('');
 
@@ -20,7 +19,6 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
     if (identity) {
       setTempName(identity.name);
       setProfilePicture(identity.profilePicture);
-      setTextSetting(identity.textSetting);
       setPrompt(identity.prompt);
     }
   }, [identity?.id]);
@@ -74,7 +72,6 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
       ...identity,
       name: tempName || 'Unnamed',
       profilePicture,
-      textSetting,
       prompt
     };
 
@@ -126,19 +123,6 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
             onChange={(e) => setTempName(e.target.value)}
             placeholder="Enter identity name"
             className="text-input"
-          />
-        </div>
-
-        {/* Text Setting Section */}
-        <div className="form-section">
-          <label htmlFor="text-setting">Text Setting</label>
-          <textarea
-            id="text-setting"
-            value={textSetting}
-            onChange={(e) => setTextSetting(e.target.value)}
-            placeholder="Enter text setting..."
-            className="textarea"
-            rows={4}
           />
         </div>
 

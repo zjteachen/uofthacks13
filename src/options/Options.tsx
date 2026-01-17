@@ -19,7 +19,6 @@ function Options() {
             return {
               ...identity,
               profilePicture: imageData[`image_${identity.id}`] || '',
-              textSetting: identity.textSetting || '',
               prompt: identity.prompt || ''
             };
           })
@@ -35,7 +34,6 @@ function Options() {
       id: Date.now().toString(),
       name: 'New Identity',
       profilePicture: '',
-      textSetting: '',
       prompt: '',
       createdAt: Date.now()
     };
