@@ -1,9 +1,9 @@
-import OpenAI from 'openai';
+import OpenAI from "openai";
 
 // OpenAI API Configuration
 const openai = new OpenAI({
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true
+  dangerouslyAllowBrowser: true,
 });
 
 // Store the current textarea being monitored
@@ -12,16 +12,94 @@ let approvedMessages = new Set();
 let currentSendButton = null;
 let currentForm = null;
 
-// Detect personal information using AI
-async function detectPersonalInfoWithAI(text) {
-  try {
-    console.log('Privacy Guard: Starting AI detection for text:', text.substring(0, 50) + '...');
-    
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{
-        role: 'system',
-        content: `You are a highly sensitive privacy protection assistant. Your job is to catch ALL information that could reveal someone's identity or location, including subtle hints and contextual clues.
+// Fetch the selected identity from chrome storage
+async function getSelectedIdentity() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(["identities", "selectedId"], (result) => {
+      if (result.selectedId && result.identities) {
+        const identity = result.identities.find(
+          (i) => i.id === result.selectedId,
+        );
+        resolve(identity || null);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+// Extract chat history from ChatGPT's DOM
+function extractChatHistory() {
+  const messages = [];
+  // ChatGPT uses article elements or divs with data-message attributes
+  const messageElements = document.querySelectorAll(
+    "[data-message-author-role]",
+  );
+
+  messageElements.forEach((el) => {
+    const role = el.getAttribute("data-message-author-role");
+    const textContent = el.textContent?.trim() || "";
+    if (textContent) {
+      messages.push({ role, content: textContent });
+    }
+  });
+
+  return messages;
+}
+
+// Build the system prompt based on whether we have identity context
+function buildDetectionPrompt(identity, chatHistory) {
+  // If identity exists, use context-aware detection
+  console.log("Literally pissing");
+  if (
+    identity &&
+    identity.characteristics &&
+    identity.characteristics.length > 0
+  ) {
+    const characteristicsList = identity.characteristics
+      .map((c) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+    console.log(characteristicsList);
+
+    const chatHistorySummary =
+      chatHistory.length > 0
+        ? chatHistory
+            .map(
+              (m) =>
+                `${m.role}: ${m.content.substring(0, 200)}${m.content.length > 200 ? "..." : ""}`,
+            )
+            .join("\n")
+        : "No previous messages in this conversation.";
+
+    return `You are a privacy protection assistant. The user has a privacy profile that defines what personal information they're comfortable sharing in this context.
+
+PRIVACY PROFILE: "${identity.name}"
+Allowed information to share:
+${characteristicsList}
+
+CHAT HISTORY (what's already been shared in this conversation):
+${chatHistorySummary}
+
+Your task: Flag ONLY information that reveals MORE about the user than what's defined in their allowed characteristics OR what they've already shared in this conversation.
+
+Rules:
+1. Information matching the profile's characteristics is ALLOWED (e.g., if "Name: Alex" is in characteristics, mentioning "Alex" is fine)
+2. More specific information than what's in the profile should be flagged (e.g., if profile has "Location: Canada", mentioning "Toronto" should be flagged as more specific)
+3. If something was already shared in the chat history, don't flag it again
+4. Focus on information ESCALATION - what's new and more revealing than the profile allows
+5. Information not covered by any characteristic should be flagged (e.g., if no email in profile, any email should be flagged)
+
+Return a JSON array. Each item must have:
+- "text": the exact phrase/word that reveals information
+- "type": "location", "personal_detail", "identifier", "contact_info", etc.
+- "reason": clear explanation of what this reveals beyond the allowed profile
+- "severity": "high" (direct identifiers not in profile), "medium" (more specific than profile), "low" (weak clues)
+
+Return ONLY the JSON array, nothing else. Return [] if the message stays within the bounds of the allowed characteristics.`;
+  }
+
+  // Fallback: no identity - flag all personal info (original behavior)
+  return `You are a highly sensitive privacy protection assistant. Your job is to catch ALL information that could reveal someone's identity or location, including subtle hints and contextual clues.
 
 IMPORTANT: Be extremely cautious. If something MIGHT reveal private information, flag it.
 
@@ -50,46 +128,89 @@ Return a JSON array. Each item must have:
 
 CRITICAL: If you're unsure whether something is sensitive, FLAG IT ANYWAY. Better safe than sorry.
 
-Return ONLY the JSON array, nothing else. If truly nothing sensitive, return []`
-      }, {
-        role: 'user',
-        content: text
-      }],
+Return ONLY the JSON array, nothing else. If truly nothing sensitive, return []`;
+}
+
+// Detect personal information using AI
+async function detectPersonalInfoWithAI(
+  text,
+  identity = null,
+  chatHistory = [],
+) {
+  try {
+    console.log(
+      "Privacy Guard: Starting AI detection for text:",
+      text.substring(0, 50) + "...",
+    );
+    console.log(
+      "Privacy Guard: Identity context:",
+      identity ? identity.name : "none",
+    );
+    console.log("Privacy Guard: Chat history messages:", chatHistory.length);
+
+    const systemPrompt = buildDetectionPrompt(identity, chatHistory);
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: systemPrompt,
+        },
+        {
+          role: "user",
+          content: text,
+        },
+      ],
       temperature: 0.2,
-      max_tokens: 1500
+      max_tokens: 1500,
     });
 
     const content = completion.choices[0].message.content.trim();
-    
-    console.log('Privacy Guard: AI response:', content);
-    
+
+    console.log("Privacy Guard: AI response:", content);
+
     // Parse the JSON response
     let detected = [];
     try {
       // Remove markdown code blocks if present
-      const jsonContent = content.replace(/```json\n?|\n?```/g, '').trim();
+      const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
       detected = JSON.parse(jsonContent);
-      console.log('Privacy Guard: AI detected', detected.length, 'items');
+      console.log("Privacy Guard: AI detected", detected.length, "items");
     } catch (e) {
-      console.error('Privacy Guard: Failed to parse AI response:', e);
+      console.error("Privacy Guard: Failed to parse AI response:", e);
       detected = [];
     }
 
     return detected;
   } catch (error) {
-    console.error('Privacy Guard: AI detection error:', error);
+    console.error("Privacy Guard: AI detection error:", error);
     return [];
   }
 }
 
 // Rewrite message to remove sensitive information
-async function rewriteMessage(originalText, itemsToRemove) {
+async function rewriteMessage(originalText, itemsToRemove, identity = null) {
   try {
+    // Build context about what's allowed if we have an identity
+    let identityContext = "";
+    if (
+      identity &&
+      identity.characteristics &&
+      identity.characteristics.length > 0
+    ) {
+      const allowedInfo = identity.characteristics
+        .map((c) => `${c.name}: ${c.value}`)
+        .join(", ");
+      identityContext = `\n\nIMPORTANT: The user has a privacy profile allowing these details: ${allowedInfo}. When rewriting, you may keep information that matches these allowed characteristics, but remove or generalize the flagged items that go beyond what's allowed.`;
+    }
+
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{
-        role: 'system',
-        content: `You are a privacy protection assistant. Rewrite the user's message to remove or anonymize the specified sensitive information while maintaining the core meaning and intent of the message. 
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are a privacy protection assistant. Rewrite the user's message to remove or anonymize the specified sensitive information while maintaining the core meaning and intent of the message.
 
 CRITICAL RULES:
 1. NEVER use placeholders like [name], [location], [redacted], etc.
@@ -105,42 +226,51 @@ Examples:
 - "Hi, I'm John from Toronto" → "Hi, I'm someone from Canada" or "Hi there"
 - "My name is Sarah" → "I'm a person" or just start the message differently
 - "I live in the land of spices" → "I live in a warm country" or just remove
-
-Return ONLY the rewritten message text, nothing else.`
-      }, {
-        role: 'user',
-        content: `Original message: "${originalText}"\n\nRemove these sensitive items:\n${itemsToRemove.map((item, idx) => `${idx + 1}. "${item.text}" (${item.reason})`).join('\n')}`
-      }],
+${identityContext}
+Return ONLY the rewritten message text, nothing else.`,
+        },
+        {
+          role: "user",
+          content: `Original message: "${originalText}"\n\nRemove these sensitive items:\n${itemsToRemove.map((item, idx) => `${idx + 1}. "${item.text}" (${item.reason})`).join("\n")}`,
+        },
+      ],
       temperature: 0.5,
-      max_tokens: 1000
+      max_tokens: 1000,
     });
 
     let rewrittenText = completion.choices[0].message.content.trim();
-    
+
     // Remove surrounding quotes if present
-    if ((rewrittenText.startsWith('"') && rewrittenText.endsWith('"')) ||
-        (rewrittenText.startsWith("'") && rewrittenText.endsWith("'"))) {
+    if (
+      (rewrittenText.startsWith('"') && rewrittenText.endsWith('"')) ||
+      (rewrittenText.startsWith("'") && rewrittenText.endsWith("'"))
+    ) {
       rewrittenText = rewrittenText.slice(1, -1);
     }
-    
+
     return rewrittenText;
   } catch (error) {
-    console.error('Rewrite error:', error);
+    console.error("Rewrite error:", error);
     return originalText;
   }
 }
 
 // Create warning modal with AI-detected items
-function createWarningModal(originalText, textarea) {
+function createWarningModal(
+  originalText,
+  textarea,
+  identity = null,
+  chatHistory = [],
+) {
   // Remove existing modal if present
-  const existingModal = document.getElementById('privacy-warning-modal');
+  const existingModal = document.getElementById("privacy-warning-modal");
   if (existingModal) {
     existingModal.remove();
   }
 
-  const modal = document.createElement('div');
-  modal.id = 'privacy-warning-modal';
-  
+  const modal = document.createElement("div");
+  modal.id = "privacy-warning-modal";
+
   modal.innerHTML = `
     <div class="privacy-modal-overlay">
       <div class="privacy-modal-content">
@@ -168,7 +298,7 @@ function createWarningModal(originalText, textarea) {
   `;
 
   // Add styles
-  const style = document.createElement('style');
+  const style = document.createElement("style");
   style.textContent = `
     .privacy-modal-overlay {
       position: fixed;
@@ -420,71 +550,86 @@ function createWarningModal(originalText, textarea) {
   document.head.appendChild(style);
   document.body.appendChild(modal);
 
-  console.log('Privacy Guard: Modal created and shown immediately');
+  console.log("Privacy Guard: Modal created and shown immediately");
 
   // Return promise that will be resolved based on user action
   return new Promise(async (resolve) => {
-    const cancelBtn = modal.querySelector('#privacy-cancel-btn');
-    const proceedOriginalBtn = modal.querySelector('#privacy-proceed-original-btn');
-    const rewriteBtn = modal.querySelector('#privacy-rewrite-btn');
+    const cancelBtn = modal.querySelector("#privacy-cancel-btn");
+    const proceedOriginalBtn = modal.querySelector(
+      "#privacy-proceed-original-btn",
+    );
+    const rewriteBtn = modal.querySelector("#privacy-rewrite-btn");
 
     // Set up cancel button (works in loading state)
-    cancelBtn.addEventListener('click', () => {
-      console.log('Privacy Guard: User clicked Cancel');
+    cancelBtn.addEventListener("click", () => {
+      console.log("Privacy Guard: User clicked Cancel");
       modal.remove();
-      resolve({ action: 'cancel' });
+      resolve({ action: "cancel" });
     });
 
-    // Start AI detection in background
-    const detectedInfo = await detectPersonalInfoWithAI(originalText);
-    
-    console.log('Privacy Guard: Detection complete, found', detectedInfo.length, 'items');
+    // Start AI detection in background with identity and chat history context
+    const detectedInfo = await detectPersonalInfoWithAI(
+      originalText,
+      identity,
+      chatHistory,
+    );
+
+    console.log(
+      "Privacy Guard: Detection complete, found",
+      detectedInfo.length,
+      "items",
+    );
 
     // If nothing detected, automatically proceed
     if (detectedInfo.length === 0) {
-      console.log('Privacy Guard: No sensitive info detected, auto-proceeding');
+      console.log("Privacy Guard: No sensitive info detected, auto-proceeding");
       modal.remove();
-      resolve({ action: 'proceed', text: originalText });
+      resolve({ action: "proceed", text: originalText });
       return;
     }
 
     // Update modal with results
     const severityEmoji = {
-      high: '🔴',
-      medium: '🟡',
-      low: '🟢'
+      high: "🔴",
+      medium: "🟡",
+      low: "🟢",
     };
 
-    const detectedListHtml = detectedInfo.map((info, idx) => `
+    const detectedListHtml = detectedInfo
+      .map(
+        (info, idx) => `
       <div class="info-item" data-index="${idx}">
         <div class="info-checkbox">
           <input type="checkbox" id="item-${idx}" checked>
           <label for="item-${idx}">
             <div class="info-header">
-              <span class="severity-badge">${severityEmoji[info.severity] || '🟡'} ${info.severity?.toUpperCase() || 'MEDIUM'}</span>
-              <span class="info-type">${info.type || 'Sensitive Info'}</span>
+              <span class="severity-badge">${severityEmoji[info.severity] || "🟡"} ${info.severity?.toUpperCase() || "MEDIUM"}</span>
+              <span class="info-type">${info.type || "Sensitive Info"}</span>
             </div>
             <div class="info-text">"${info.text}"</div>
             <div class="info-reason">${info.reason}</div>
           </label>
         </div>
       </div>
-    `).join('');
+    `,
+      )
+      .join("");
 
-    modal.querySelector('.detected-info-list').innerHTML = detectedListHtml;
-    modal.querySelector('.privacy-modal-header h2').textContent = '⚠️ Personal Information Detected';
-    modal.querySelector('.loading-state').style.display = 'none';
-    modal.querySelector('.results-state').style.display = 'block';
-    proceedOriginalBtn.style.display = 'inline-block';
-    rewriteBtn.style.display = 'inline-block';
+    modal.querySelector(".detected-info-list").innerHTML = detectedListHtml;
+    modal.querySelector(".privacy-modal-header h2").textContent =
+      "⚠️ Personal Information Detected";
+    modal.querySelector(".loading-state").style.display = "none";
+    modal.querySelector(".results-state").style.display = "block";
+    proceedOriginalBtn.style.display = "inline-block";
+    rewriteBtn.style.display = "inline-block";
 
-    proceedOriginalBtn.addEventListener('click', () => {
-      console.log('Privacy Guard: User clicked Send Original');
+    proceedOriginalBtn.addEventListener("click", () => {
+      console.log("Privacy Guard: User clicked Send Original");
       modal.remove();
-      resolve({ action: 'proceed', text: originalText });
+      resolve({ action: "proceed", text: originalText });
     });
 
-    rewriteBtn.addEventListener('click', async () => {
+    rewriteBtn.addEventListener("click", async () => {
       // Get ONLY checked items
       const checkedItems = [];
       detectedInfo.forEach((info, idx) => {
@@ -494,27 +639,37 @@ function createWarningModal(originalText, textarea) {
         }
       });
 
-      console.log('Privacy Guard: User wants to rewrite', checkedItems.length, 'out of', detectedInfo.length, 'items');
+      console.log(
+        "Privacy Guard: User wants to rewrite",
+        checkedItems.length,
+        "out of",
+        detectedInfo.length,
+        "items",
+      );
 
       if (checkedItems.length === 0) {
         // Nothing to rewrite, just send original
         modal.remove();
-        resolve({ action: 'proceed', text: originalText });
+        resolve({ action: "proceed", text: originalText });
         return;
       }
 
       // Show loading state
       rewriteBtn.disabled = true;
-      rewriteBtn.textContent = 'Rewriting...';
+      rewriteBtn.textContent = "Rewriting...";
 
       try {
-        const rewrittenText = await rewriteMessage(originalText, checkedItems);
+        const rewrittenText = await rewriteMessage(
+          originalText,
+          checkedItems,
+          identity,
+        );
         modal.remove();
-        resolve({ action: 'rewrite', text: rewrittenText });
+        resolve({ action: "rewrite", text: rewrittenText });
       } catch (error) {
-        alert('Failed to rewrite message. Please try again.');
+        alert("Failed to rewrite message. Please try again.");
         rewriteBtn.disabled = false;
-        rewriteBtn.textContent = 'Rewrite & Send';
+        rewriteBtn.textContent = "Rewrite & Send";
       }
     });
   });
@@ -525,7 +680,7 @@ function hashString(str) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
+    hash = (hash << 5) - hash + char;
     hash = hash & hash;
   }
   return hash.toString();
@@ -533,29 +688,50 @@ function hashString(str) {
 
 // Check if the submit button was clicked
 async function interceptSubmission(textarea, shouldAutoSubmit = false) {
-  const text = textarea.value || textarea.textContent || textarea.innerText || '';
+  const text =
+    textarea.value || textarea.textContent || textarea.innerText || "";
   const textHash = hashString(text);
-  
-  console.log('Privacy Guard: interceptSubmission called, text length:', text.length);
-  
+
+  console.log(
+    "Privacy Guard: interceptSubmission called, text length:",
+    text.length,
+  );
+
   // If already approved, allow through
   if (approvedMessages.has(textHash)) {
-    console.log('Privacy Guard: Message already approved');
+    console.log("Privacy Guard: Message already approved");
     return { proceed: true, text };
   }
-  
-  // Show modal immediately, detection happens inside
-  const result = await createWarningModal(text, textarea);
-  
-  console.log('Privacy Guard: User decision:', result.action);
-  console.log('Privacy Guard: User decision:', result.action);
-  
-  if (result.action === 'cancel') {
+
+  // Gather context: selected identity and chat history
+  const identity = await getSelectedIdentity();
+  const chatHistory = extractChatHistory();
+
+  console.log(
+    "Privacy Guard: Context gathered - identity:",
+    identity ? identity.name : "none",
+    ", chat history:",
+    chatHistory.length,
+    "messages",
+  );
+
+  // Show modal immediately, detection happens inside with context
+  const result = await createWarningModal(
+    text,
+    textarea,
+    identity,
+    chatHistory,
+  );
+
+  console.log("Privacy Guard: User decision:", result.action);
+  console.log("Privacy Guard: User decision:", result.action);
+
+  if (result.action === "cancel") {
     return { proceed: false };
-  } else if (result.action === 'proceed') {
+  } else if (result.action === "proceed") {
     // User wants to send original message
     approvedMessages.add(textHash);
-    
+
     if (shouldAutoSubmit) {
       setTimeout(() => {
         if (currentSendButton) {
@@ -565,13 +741,13 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
         }
       }, 50);
     }
-    
+
     return { proceed: true, text: result.text };
-  } else if (result.action === 'rewrite') {
+  } else if (result.action === "rewrite") {
     // Mark rewritten message as approved to skip re-checking
     const rewrittenHash = hashString(result.text);
     approvedMessages.add(rewrittenHash);
-    
+
     // Update textarea with rewritten text
     if (textarea.value !== undefined) {
       textarea.value = result.text;
@@ -579,11 +755,11 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
       textarea.textContent = result.text;
       textarea.innerText = result.text;
     }
-    
+
     // Trigger input event to update ChatGPT's internal state
-    const inputEvent = new Event('input', { bubbles: true });
+    const inputEvent = new Event("input", { bubbles: true });
     textarea.dispatchEvent(inputEvent);
-    
+
     // Auto-submit the rewritten message
     if (shouldAutoSubmit) {
       setTimeout(() => {
@@ -594,30 +770,30 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
         }
       }, 100);
     }
-    
+
     return { proceed: true, text: result.text };
   }
 }
 
 // Monitor the ChatGPT input
 function monitorChatGPTInput() {
-  console.log('Privacy Guard: Initializing...');
-  
+  console.log("Privacy Guard: Initializing...");
+
   // Find the textarea - ChatGPT uses a contenteditable div or textarea
   const findInput = () => {
     // Try multiple selectors as ChatGPT's DOM structure may vary
     const selectors = [
-      'textarea[data-id]',
-      '#prompt-textarea',
-      'textarea',
+      "textarea[data-id]",
+      "#prompt-textarea",
+      "textarea",
       '[contenteditable="true"]',
-      'div[contenteditable="true"]'
+      'div[contenteditable="true"]',
     ];
-    
+
     for (const selector of selectors) {
       const el = document.querySelector(selector);
       if (el) {
-        console.log('Privacy Guard: Found input with selector:', selector);
+        console.log("Privacy Guard: Found input with selector:", selector);
         return el;
       }
     }
@@ -626,62 +802,77 @@ function monitorChatGPTInput() {
 
   const setupMonitoring = () => {
     const input = findInput();
-    
+
     if (!input) {
       return;
     }
-    
+
     if (input === currentTextarea) {
       return; // Already monitoring this input
     }
-    
+
     currentTextarea = input;
-    console.log('Privacy Guard: Setting up event listeners on input');
+    console.log("Privacy Guard: Setting up event listeners on input");
 
     // Method 1: Intercept Enter key
-    input.addEventListener('keydown', async (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        console.log('Privacy Guard: Enter key pressed');
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
+    input.addEventListener(
+      "keydown",
+      async (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+          console.log("Privacy Guard: Enter key pressed");
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
 
-        const result = await interceptSubmission(input, true);
-        
-        if (!result.proceed) {
-          return false;
+          const result = await interceptSubmission(input, true);
+
+          if (!result.proceed) {
+            return false;
+          }
         }
-      }
-    }, true);
+      },
+      true,
+    );
 
     // Method 2: Monitor form submission
-    const form = input.closest('form');
+    const form = input.closest("form");
     if (form) {
       currentForm = form;
-      console.log('Privacy Guard: Found form, adding listener');
-      form.addEventListener('submit', async (e) => {
-        console.log('Privacy Guard: Form submit detected');
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
+      console.log("Privacy Guard: Found form, adding listener");
+      form.addEventListener(
+        "submit",
+        async (e) => {
+          console.log("Privacy Guard: Form submit detected");
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
 
-        const result = await interceptSubmission(input, true);
-        
-        if (!result.proceed) {
-          return false;
-        }
-      }, true);
+          const result = await interceptSubmission(input, true);
+
+          if (!result.proceed) {
+            return false;
+          }
+        },
+        true,
+      );
     }
 
     // Method 3: Monitor the send button
     const findSendButton = () => {
-      const buttons = document.querySelectorAll('button');
+      const buttons = document.querySelectorAll("button");
       for (const btn of buttons) {
-        const hasDataTestId = btn.getAttribute('data-testid') === 'send-button';
-        const hasSvg = btn.querySelector('svg');
-        const isAriaLabel = btn.getAttribute('aria-label')?.toLowerCase().includes('send');
-        
-        if (hasDataTestId || (hasSvg && btn.textContent.trim() === '') || isAriaLabel) {
+        const hasDataTestId = btn.getAttribute("data-testid") === "send-button";
+        const hasSvg = btn.querySelector("svg");
+        const isAriaLabel = btn
+          .getAttribute("aria-label")
+          ?.toLowerCase()
+          .includes("send");
+
+        if (
+          hasDataTestId ||
+          (hasSvg && btn.textContent.trim() === "") ||
+          isAriaLabel
+        ) {
           return btn;
         }
       }
@@ -691,19 +882,23 @@ function monitorChatGPTInput() {
     const sendButton = findSendButton();
     if (sendButton) {
       currentSendButton = sendButton;
-      console.log('Privacy Guard: Found send button, adding listener');
-      sendButton.addEventListener('click', async (e) => {
-        console.log('Privacy Guard: Send button clicked');
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
+      console.log("Privacy Guard: Found send button, adding listener");
+      sendButton.addEventListener(
+        "click",
+        async (e) => {
+          console.log("Privacy Guard: Send button clicked");
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
 
-        const result = await interceptSubmission(input, true);
-        
-        if (!result.proceed) {
-          return false;
-        }
-      }, true);
+          const result = await interceptSubmission(input, true);
+
+          if (!result.proceed) {
+            return false;
+          }
+        },
+        true,
+      );
     }
   };
 
@@ -718,15 +913,15 @@ function monitorChatGPTInput() {
   });
   observer.observe(document.body, {
     childList: true,
-    subtree: true
+    subtree: true,
   });
 }
 
 // Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', monitorChatGPTInput);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", monitorChatGPTInput);
 } else {
   monitorChatGPTInput();
 }
 
-console.log('Privacy Guard: Content script loaded for ChatGPT');
+console.log("Privacy Guard: Content script loaded for ChatGPT");

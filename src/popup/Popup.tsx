@@ -1,32 +1,120 @@
+import { useState, useEffect } from 'react';
+import { Identity } from '../types/identity';
+import { getIdentitiesStorage, setSelectedIdentity, getProfilePicture } from '../utils/storage';
+
 function Popup() {
+  const [identities, setIdentities] = useState<Identity[]>([]);
+  const [currentIdentity, setCurrentIdentity] = useState<Identity | null>(null);
+  const [selectedDropdownId, setSelectedDropdownId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadIdentities();
+  }, []);
+
+  const loadIdentities = async () => {
+    const storage = await getIdentitiesStorage();
+
+    // Load profile pictures from local storage (matching Options.tsx pattern)
+    const identitiesWithImages = await Promise.all(
+      storage.identities.map(async (identity) => {
+        const profilePicture = await getProfilePicture(identity.id);
+        return { ...identity, profilePicture };
+      })
+    );
+
+    setIdentities(identitiesWithImages);
+
+    if (storage.selectedId) {
+      const selected = identitiesWithImages.find(i => i.id === storage.selectedId);
+      setCurrentIdentity(selected || null);
+      setSelectedDropdownId(storage.selectedId);
+    } else if (identitiesWithImages.length > 0) {
+      setSelectedDropdownId(identitiesWithImages[0].id);
+    }
+
+    setLoading(false);
+  };
+
+  const handleSwitch = async () => {
+    if (!selectedDropdownId) return;
+
+    await setSelectedIdentity(selectedDropdownId);
+    const newIdentity = identities.find(i => i.id === selectedDropdownId);
+    setCurrentIdentity(newIdentity || null);
+  };
+
   const handleOpenOptions = () => {
     chrome.runtime.openOptionsPage();
   };
 
+  if (loading) {
+    return (
+      <div className="container">
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="container">
-      <h1>🛡️ Privacy Guard</h1>
-      <p>Protecting your personal information on ChatGPT.</p>
-      
-      <div className="feature-info">
-        <h3>What we detect:</h3>
-        <ul>
-          <li>📧 Email addresses</li>
-          <li>📱 Phone numbers</li>
-          <li>🏠 Street addresses</li>
-          <li>💳 Credit card numbers</li>
-          <li>🆔 Social Security Numbers</li>
-          <li>📮 ZIP codes</li>
-          <li>🌐 IP addresses</li>
-        </ul>
+      <h1>Privacy Guard</h1>
+
+      <div className="current-identity-section">
+        <h3>Current Identity</h3>
+        {currentIdentity ? (
+          <div className="identity-card">
+            {currentIdentity.profilePicture && (
+              <img
+                src={currentIdentity.profilePicture}
+                alt={currentIdentity.name}
+                className="identity-avatar"
+              />
+            )}
+            <div className="identity-info">
+              <span className="identity-name">{currentIdentity.name}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="no-identity">
+            <span>No identity selected</span>
+          </div>
+        )}
       </div>
-      
-      <p className="info-text">
-        When you try to send a message on ChatGPT containing personal information, 
-        we'll show you a warning and ask for confirmation before proceeding.
-      </p>
-      
-      <button onClick={handleOpenOptions}>Open Settings</button>
+
+      {identities.length > 0 ? (
+        <div className="switch-section">
+          <h3>Switch Identity</h3>
+          <div className="switch-controls">
+            <select
+              value={selectedDropdownId}
+              onChange={(e) => setSelectedDropdownId(e.target.value)}
+              className="identity-dropdown"
+            >
+              {identities.map(identity => (
+                <option key={identity.id} value={identity.id}>
+                  {identity.name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleSwitch}
+              disabled={selectedDropdownId === currentIdentity?.id}
+              className="switch-btn"
+            >
+              Switch
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="no-identities-message">
+          <p>No identities created yet. Open settings to create your first identity.</p>
+        </div>
+      )}
+
+      <button onClick={handleOpenOptions} className="settings-btn">
+        Open Settings
+      </button>
     </div>
   );
 }
