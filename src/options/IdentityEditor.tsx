@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Identity } from '../types/identity';
+import { Identity, Characteristic } from '../types/identity';
+import { PREDEFINED_ATTRIBUTES } from '../constants/attributes';
+import { generateDescriptionFromCharacteristics } from '../utils/gemini';
+import { getOpenAIApiKey, saveOpenAIApiKey } from '../utils/storage';
 import './IdentityEditor.css';
 
 interface IdentityEditorProps {
@@ -12,7 +15,14 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
   const [tempName, setTempName] = useState(identity?.name || '');
   const [profilePicture, setProfilePicture] = useState(identity?.profilePicture || '');
   const [prompt, setPrompt] = useState(identity?.prompt || '');
+  const [characteristics, setCharacteristics] = useState<Characteristic[]>(identity?.characteristics || []);
+  const [selectedAttribute, setSelectedAttribute] = useState('');
+  const [customAttributeName, setCustomAttributeName] = useState('');
+  const [attributeValue, setAttributeValue] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   // Update state when identity prop changes
   useEffect(() => {
@@ -20,7 +30,15 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
       setTempName(identity.name);
       setProfilePicture(identity.profilePicture);
       setPrompt(identity.prompt);
+      setCharacteristics(identity.characteristics || []);
+      setSelectedAttribute('');
+      setCustomAttributeName('');
+      setAttributeValue('');
     }
+    // Load API key on mount
+    getOpenAIApiKey().then(key => {
+      if (key) setApiKey(key);
+    });
   }, [identity?.id]);
 
   const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,13 +90,98 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
       ...identity,
       name: tempName || 'Unnamed',
       profilePicture,
-      prompt
+      prompt,
+      characteristics
     };
 
     onSave(updatedIdentity);
     onNameChange(tempName || 'Unnamed');
     setSaveStatus('Saved!');
     setTimeout(() => setSaveStatus(''), 2000);
+  };
+
+  const handleAddCharacteristic = () => {
+    let charName = '';
+    
+    if (selectedAttribute === 'Custom Attribute') {
+      if (!customAttributeName.trim() || !attributeValue.trim()) {
+        alert('Please enter both attribute name and value');
+        return;
+      }
+      charName = customAttributeName;
+    } else if (selectedAttribute) {
+      if (!attributeValue.trim()) {
+        alert('Please enter a value');
+        return;
+      }
+      charName = selectedAttribute;
+    } else {
+      alert('Please select an attribute');
+      return;
+    }
+
+    const newChar: Characteristic = {
+      id: Date.now().toString(),
+      name: charName,
+      value: attributeValue
+    };
+
+    setCharacteristics([...characteristics, newChar]);
+    setSelectedAttribute('');
+    setCustomAttributeName('');
+    setAttributeValue('');
+  };
+
+  const handleUpdateCharacteristic = (id: string, name: string, value: string) => {
+    setCharacteristics(
+      characteristics.map(char =>
+        char.id === id ? { ...char, name, value } : char
+      )
+    );
+  };
+
+  const handleGenerateDescription = async () => {
+    if (!apiKey.trim()) {
+      alert('API key not found. Please enter your Blackboard AI API key.');
+      setShowApiKeyInput(true);
+      return;
+    }
+
+    if (characteristics.length === 0) {
+      alert('Please add some characteristics first');
+      return;
+    }
+
+    setIsGenerating(true);
+    try {
+      const generated = await generateDescriptionFromCharacteristics(
+        apiKey,
+        characteristics,
+        tempName
+      );
+      setPrompt(generated);
+      setSaveStatus('Generated!');
+      setTimeout(() => setSaveStatus(''), 2000);
+    } catch (error) {
+      alert(`Error generating description: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSaveApiKey = async () => {
+    if (!apiKey.trim()) {
+      alert('Please enter an API key');
+      return;
+    }
+    await saveOpenAIApiKey(apiKey);
+    setShowApiKeyInput(false);
+    setSaveStatus('API key saved!');
+    setTimeout(() => setSaveStatus(''), 2000);
+  };
+
+  const handleDeleteCharacteristic = (id: string) => {
+    setCharacteristics(characteristics.filter(char => char.id !== id));
   };
 
   if (!identity) {
@@ -88,7 +191,6 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
       </div>
     );
   }
-
   return (
     <div className="identity-editor">
       <div className="editor-header">
@@ -128,7 +230,18 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
 
         {/* Prompt Section */}
         <div className="form-section">
-          <label htmlFor="prompt">Prompt</label>
+          <div className="prompt-header">
+            <label htmlFor="prompt">Prompt</label>
+            <button
+              className="generate-btn"
+              onClick={handleGenerateDescription}
+              type="button"
+              disabled={isGenerating || characteristics.length === 0}
+              title={characteristics.length === 0 ? 'Add characteristics first' : 'Generate with AI'}
+            >
+              {isGenerating ? 'Generating...' : '✨ Generate'}
+            </button>
+          </div>
           <textarea
             id="prompt"
             value={prompt}
@@ -137,6 +250,105 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
             className="textarea"
             rows={6}
           />
+          {showApiKeyInput && (
+            <div className="api-key-input-section">
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="Enter your Blackboard AI API key"
+                className="api-key-input"
+                onKeyPress={(e) => e.key === 'Enter' && handleSaveApiKey()}
+              />
+              <button
+                className="save-api-key-btn"
+                onClick={handleSaveApiKey}
+                type="button"
+              >
+                Save Key
+              </button>
+              <button
+                className="cancel-api-key-btn"
+                onClick={() => setShowApiKeyInput(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Characteristics Section */}
+        <div className="form-section">
+          <label>Identity Characteristics</label>
+          <div className="characteristics-list">
+            {characteristics.map((char) => (
+              <div key={char.id} className="characteristic-item">
+                <span className="char-name">{char.name}:</span>
+                <input
+                  type="text"
+                  value={char.value}
+                  onChange={(e) => handleUpdateCharacteristic(char.id, char.name, e.target.value)}
+                  placeholder="Enter value"
+                  className="char-value-input"
+                />
+                <button
+                  className="delete-char-btn"
+                  onClick={() => handleDeleteCharacteristic(char.id)}
+                  type="button"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="add-characteristic">
+            <select
+              value={selectedAttribute}
+              onChange={(e) => {
+                setSelectedAttribute(e.target.value);
+                if (e.target.value !== 'Custom Attribute') {
+                  setCustomAttributeName('');
+                }
+              }}
+              className="attribute-select"
+            >
+              <option value="">Select an attribute...</option>
+              {PREDEFINED_ATTRIBUTES.map((attr) => (
+                <option key={attr} value={attr}>
+                  {attr}
+                </option>
+              ))}
+            </select>
+
+            {selectedAttribute === 'Custom Attribute' && (
+              <input
+                type="text"
+                value={customAttributeName}
+                onChange={(e) => setCustomAttributeName(e.target.value)}
+                placeholder="Custom attribute name"
+                className="custom-attr-input"
+                onKeyPress={(e) => e.key === 'Enter' && handleAddCharacteristic()}
+              />
+            )}
+
+            <input
+              type="text"
+              value={attributeValue}
+              onChange={(e) => setAttributeValue(e.target.value)}
+              placeholder="Value"
+              className="attr-value-input"
+              onKeyPress={(e) => e.key === 'Enter' && handleAddCharacteristic()}
+            />
+            <button
+              className="add-char-btn"
+              onClick={handleAddCharacteristic}
+              type="button"
+            >
+              Add
+            </button>
+          </div>
         </div>
 
         {/* Save Button */}

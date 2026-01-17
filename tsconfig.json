@@ -5,6 +5,7 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
+    "types": ["vite/client", "chrome"],
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -18,10 +19,7 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    
-    /* Chrome Extension */
-    "types": ["chrome"]
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

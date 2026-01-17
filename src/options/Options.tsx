@@ -19,7 +19,8 @@ function Options() {
             return {
               ...identity,
               profilePicture: imageData[`image_${identity.id}`] || '',
-              prompt: identity.prompt || ''
+              prompt: identity.prompt || '',
+              characteristics: identity.characteristics || []
             };
           })
         );
@@ -35,6 +36,7 @@ function Options() {
       name: 'New Identity',
       profilePicture: '',
       prompt: '',
+      characteristics: [],
       createdAt: Date.now()
     };
 
