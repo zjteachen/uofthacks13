@@ -1,7 +1,7 @@
 // ==========================================
 // FEATURE TOGGLES (for testing/debugging)
 // ==========================================
-const ENABLE_INPUT_MONITORING = true; // Monitor outgoing messages for personal info
+const ENABLE_INPUT_MONITORING = false; // Monitor outgoing messages for personal info
 const ENABLE_RESPONSE_MONITORING = true; // Monitor AI responses for privacy violations
 const ENABLE_VERBOSE_LOGGING = false; // Reduce console spam when false
 
@@ -450,7 +450,7 @@ function showContextPollutionModal(violations, identity) {
   };
 
   // Track selected action for each violation: null, 'ignore', 'deny', 'pollute'
-  const selections = violations.map(() => null);
+  const selections = violations.map(() => "ignore");
 
   const modal = document.createElement("div");
   modal.id = "context-pollution-modal";
@@ -539,7 +539,9 @@ function showContextPollutionModal(violations, identity) {
   function updateSubmitButton() {
     const submitBtn = modal.querySelector("#pollution-submit-btn");
     const hasAnySelection = selections.some((s) => s !== null);
-    const hasActionableSelection = selections.some((s) => s === "deny" || s === "pollute");
+    const hasActionableSelection = selections.some(
+      (s) => s === "deny" || s === "pollute",
+    );
 
     submitBtn.disabled = !hasAnySelection;
 
@@ -651,7 +653,16 @@ async function analyzeAssistantResponse(responseText) {
   if (violations.length > 0) {
     const result = await showContextPollutionModal(violations, identity);
     console.log("Privacy Guard: User action:", result.action);
-    // TODO: Implement actual pollution message sending in next phase
+    if (result.action == "submit") {
+      const toDeny = result.toDeny;
+      const toPollute = result.toPollute;
+
+      chrome.runtime.sendMessage({
+        type: "generateCombinedPollutionMessage",
+        toDeny,
+        toPollute,
+      });
+    }
   }
 }
 
