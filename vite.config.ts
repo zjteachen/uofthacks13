@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
-import { copyFileSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync } from 'fs';
 
 export default defineConfig({
   base: './',
@@ -11,6 +11,11 @@ export default defineConfig({
       name: 'copy-manifest',
       closeBundle() {
         copyFileSync('public/manifest.json', 'dist/manifest.json');
+        // Ensure content directory exists
+        if (!existsSync('dist/content')) {
+          mkdirSync('dist/content', { recursive: true });
+        }
+        copyFileSync('src/content/chatgpt-monitor.css', 'dist/content/chatgpt-monitor.css');
       }
     }
   ],

@@ -145,257 +145,6 @@ function createWarningModal(
     </div>
   `;
 
-  // Add styles
-  const style = document.createElement("style");
-  style.textContent = `
-    .privacy-modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-color: rgba(0, 0, 0, 0.75);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 999999;
-      animation: fadeIn 0.2s ease-in;
-      backdrop-filter: blur(4px);
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    .privacy-modal-content {
-      background: #2f2f2f;
-      border: 1px solid #565869;
-      border-radius: 16px;
-      padding: 0;
-      max-width: 600px;
-      width: 90%;
-      max-height: 80vh;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
-      animation: slideUp 0.3s ease-out;
-    }
-
-    @keyframes slideUp {
-      from {
-        transform: translateY(20px);
-        opacity: 0;
-      }
-      to {
-        transform: translateY(0);
-        opacity: 1;
-      }
-    }
-
-    .privacy-modal-header {
-      padding: 20px 24px 16px 24px;
-      border-bottom: 1px solid #565869;
-      flex-shrink: 0;
-    }
-
-    .privacy-modal-header h2 {
-      margin: 0;
-      font-size: 18px;
-      color: #ececec;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .privacy-modal-body {
-      padding: 20px 24px;
-      color: #c5c5d2;
-      line-height: 1.6;
-      font-size: 14px;
-      overflow-y: auto;
-      flex: 1;
-    }
-
-    .loading-state {
-      text-align: center;
-      padding: 40px 20px;
-    }
-
-    .spinner {
-      width: 40px;
-      height: 40px;
-      margin: 0 auto 20px;
-      border: 4px solid #565869;
-      border-top: 4px solid #19c37d;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    .loading-state p {
-      color: #a0a0a8;
-      margin: 0;
-    }
-
-    .privacy-modal-body > p:first-child {
-      margin: 0 0 16px 0;
-    }
-
-    .detected-info-list {
-      margin: 0 0 16px 0;
-    }
-
-    .info-item {
-      background: #3e3e3e;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      padding: 14px;
-      border: 2px solid transparent;
-      transition: all 0.2s;
-    }
-
-    .info-item:hover {
-      background: #454545;
-      border-color: #565869;
-    }
-
-    .info-checkbox {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-    }
-
-    .info-checkbox input[type="checkbox"] {
-      margin-top: 4px;
-      width: 18px;
-      height: 18px;
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-
-    .info-checkbox label {
-      flex: 1;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .info-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 8px;
-    }
-
-    .severity-badge {
-      font-size: 11px;
-      font-weight: 600;
-      padding: 3px 8px;
-      border-radius: 4px;
-      background: #2a2a2a;
-      color: #f5d06c;
-    }
-
-    .info-type {
-      font-size: 12px;
-      color: #a0a0a8;
-      text-transform: uppercase;
-      font-weight: 500;
-    }
-
-    .info-text {
-      color: #ff6b6b;
-      font-weight: 500;
-      margin-bottom: 6px;
-      font-size: 14px;
-      background: #2a2a2a;
-      padding: 6px 10px;
-      border-radius: 6px;
-      border-left: 3px solid #ef4444;
-      font-family: 'Söhne Mono', Monaco, 'Andale Mono', monospace;
-    }
-
-    .info-reason {
-      font-size: 13px;
-      color: #c5c5d2;
-      line-height: 1.4;
-    }
-
-    .warning-message {
-      background: #3e3020;
-      border: 1px solid #806020;
-      padding: 12px;
-      border-radius: 8px;
-      font-size: 13px;
-      color: #f5d06c;
-      margin: 16px 0 0 0 !important;
-    }
-
-    .privacy-modal-footer {
-      padding: 16px 24px;
-      border-top: 1px solid #565869;
-      display: flex;
-      justify-content: flex-end;
-      gap: 10px;
-      flex-shrink: 0;
-    }
-
-    .privacy-btn {
-      padding: 10px 16px;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s ease;
-      font-family: inherit;
-    }
-
-    .privacy-btn-cancel {
-      background: transparent;
-      color: #ececec;
-      border: 1px solid #565869;
-    }
-
-    .privacy-btn-cancel:hover {
-      background: #40414f;
-    }
-
-    .privacy-btn-proceed-original {
-      background: #806020;
-      color: #ffffff;
-      border: 1px solid #806020;
-    }
-
-    .privacy-btn-proceed-original:hover {
-      background: #6b5018;
-      border-color: #6b5018;
-    }
-
-    .privacy-btn-rewrite {
-      background: #19c37d;
-      color: #ffffff;
-      border: 1px solid #19c37d;
-    }
-
-    .privacy-btn-rewrite:hover {
-      background: #17b574;
-      border-color: #17b574;
-    }
-
-    .privacy-btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-  `;
-
-  document.head.appendChild(style);
   document.body.appendChild(modal);
 
   console.log("Privacy Guard: Modal created and shown immediately");
@@ -685,7 +434,8 @@ async function detectPrivacyViolationsInResponse(responseText, identity) {
   });
 }
 
-// Show context pollution modal (display only for now)
+// Show context pollution modal as a selection form
+// Each violation can be marked as Ignore/Deny/Pollute, then Submit generates one combined message
 function showContextPollutionModal(violations, identity) {
   // Remove existing modal if present
   const existingModal = document.getElementById("context-pollution-modal");
@@ -699,6 +449,9 @@ function showContextPollutionModal(violations, identity) {
     low: "🟢",
   };
 
+  // Track selected action for each violation: null, 'ignore', 'deny', 'pollute'
+  const selections = violations.map(() => null);
+
   const modal = document.createElement("div");
   modal.id = "context-pollution-modal";
 
@@ -710,33 +463,42 @@ function showContextPollutionModal(violations, identity) {
         </div>
         <div class="privacy-modal-body">
           <p>The AI's response indicates it knows information beyond your privacy profile "${identity.name}":</p>
+          <p class="selection-instruction">Select an action for each item, then click Submit to send a correction message.</p>
           <div class="detected-info-list">
             ${violations
               .map(
                 (v, idx) => `
-              <div class="info-item" data-index="${idx}">
-                <div class="info-checkbox">
-                  <input type="checkbox" id="pollute-${idx}" checked>
-                  <label for="pollute-${idx}">
-                    <div class="info-header">
-                      <span class="severity-badge">${severityEmoji[v.severity] || "🟡"} ${(v.severity || "medium").toUpperCase()}</span>
-                      <span class="info-type">${v.category || "Unknown"}</span>
-                    </div>
-                    <div class="info-text">"${v.knownInfo}"</div>
-                    <div class="info-reason">${v.reason}</div>
-                  </label>
+              <div class="info-item violation-item" data-index="${idx}">
+                <div class="violation-content">
+                  <div class="info-header">
+                    <span class="severity-badge">${severityEmoji[v.severity] || "🟡"} ${(v.severity || "medium").toUpperCase()}</span>
+                    <span class="info-type">${v.category || "Unknown"}</span>
+                  </div>
+                  <div class="info-text">"${v.knownInfo}"</div>
+                  <div class="info-reason">${v.reason}</div>
+                </div>
+                <div class="violation-actions">
+                  <button class="violation-action-btn btn-ignore" data-idx="${idx}" data-action="ignore">Ignore</button>
+                  <button class="violation-action-btn btn-deny" data-idx="${idx}" data-action="deny">Deny</button>
+                  <button class="violation-action-btn btn-pollute" data-idx="${idx}" data-action="pollute">Pollute</button>
                 </div>
               </div>
             `,
               )
               .join("")}
           </div>
-          <p class="warning-message">⚠️ Select items to "pollute" - we can send a message to mislead the AI about this information.</p>
+          <div class="apply-all-section">
+            <div class="apply-all-label">Apply to all items:</div>
+            <div class="apply-all-buttons">
+              <button id="apply-all-ignore" class="violation-action-btn btn-ignore">Ignore All</button>
+              <button id="apply-all-deny" class="violation-action-btn btn-deny">Deny All</button>
+              <button id="apply-all-pollute" class="violation-action-btn btn-pollute">Pollute All</button>
+            </div>
+          </div>
         </div>
         <div class="privacy-modal-footer">
-          <button id="pollution-ignore-btn" class="privacy-btn privacy-btn-cancel">Ignore</button>
-          <button id="pollution-deny-btn" class="privacy-btn privacy-btn-proceed-original">Deny Knowledge</button>
-          <button id="pollution-mislead-btn" class="privacy-btn privacy-btn-rewrite">Mislead with Fake Data</button>
+          <button id="pollution-cancel-btn" class="privacy-btn privacy-btn-cancel">Cancel</button>
+          <button id="pollution-submit-btn" class="privacy-btn privacy-btn-rewrite" disabled>Submit</button>
         </div>
       </div>
     </div>
@@ -750,47 +512,111 @@ function showContextPollutionModal(violations, identity) {
     "violations",
   );
 
+  // Helper to update button states for an item
+  function updateItemState(idx, action) {
+    selections[idx] = action;
+    const item = modal.querySelector(`.violation-item[data-index="${idx}"]`);
+    if (!item) return;
+
+    // Remove all selected states
+    item.querySelectorAll(".violation-action-btn").forEach((btn) => {
+      btn.classList.remove("selected");
+    });
+
+    // Add selected state to the chosen action
+    if (action) {
+      const selectedBtn = item.querySelector(`[data-action="${action}"]`);
+      if (selectedBtn) {
+        selectedBtn.classList.add("selected");
+      }
+    }
+
+    // Update submit button state
+    updateSubmitButton();
+  }
+
+  // Helper to update submit button enabled state
+  function updateSubmitButton() {
+    const submitBtn = modal.querySelector("#pollution-submit-btn");
+    const hasAnySelection = selections.some((s) => s !== null);
+    const hasActionableSelection = selections.some((s) => s === "deny" || s === "pollute");
+
+    submitBtn.disabled = !hasAnySelection;
+
+    // Update button text based on selections
+    if (hasActionableSelection) {
+      submitBtn.textContent = "Submit Correction";
+    } else if (hasAnySelection) {
+      submitBtn.textContent = "Dismiss";
+    } else {
+      submitBtn.textContent = "Submit";
+    }
+  }
+
+  // Add click handlers for per-item action buttons
+  modal.querySelectorAll(".violation-action-btn[data-idx]").forEach((btn) => {
+    btn.onclick = () => {
+      const idx = parseInt(btn.dataset.idx);
+      const action = btn.dataset.action;
+      updateItemState(idx, action);
+    };
+  });
+
+  // Add click handlers for "Apply to All" buttons
+  modal.querySelector("#apply-all-ignore").onclick = () => {
+    violations.forEach((_, idx) => updateItemState(idx, "ignore"));
+  };
+
+  modal.querySelector("#apply-all-deny").onclick = () => {
+    violations.forEach((_, idx) => updateItemState(idx, "deny"));
+  };
+
+  modal.querySelector("#apply-all-pollute").onclick = () => {
+    violations.forEach((_, idx) => updateItemState(idx, "pollute"));
+  };
+
   return new Promise((resolve) => {
-    modal.querySelector("#pollution-ignore-btn").onclick = () => {
-      console.log("Privacy Guard: User chose to ignore violations");
+    modal.querySelector("#pollution-cancel-btn").onclick = () => {
+      console.log("Privacy Guard: User cancelled pollution modal");
       modal.remove();
-      resolve({ action: "ignore" });
+      resolve({ action: "cancel" });
     };
 
-    modal.querySelector("#pollution-deny-btn").onclick = () => {
-      const selected = [];
-      violations.forEach((v, idx) => {
-        const checkbox = modal.querySelector(`#pollute-${idx}`);
-        if (checkbox && checkbox.checked) {
-          selected.push(v);
-        }
-      });
-      console.log(
-        "Privacy Guard: User chose to deny",
-        selected.length,
-        "items",
-      );
-      console.log("Privacy Guard: Selected violations:", selected);
-      modal.remove();
-      resolve({ action: "deny", violations: selected });
-    };
+    modal.querySelector("#pollution-submit-btn").onclick = () => {
+      // Collect all selections
+      const toDeny = [];
+      const toPollute = [];
 
-    modal.querySelector("#pollution-mislead-btn").onclick = () => {
-      const selected = [];
       violations.forEach((v, idx) => {
-        const checkbox = modal.querySelector(`#pollute-${idx}`);
-        if (checkbox && checkbox.checked) {
-          selected.push(v);
+        const action = selections[idx];
+        if (action === "deny") {
+          toDeny.push(v);
+        } else if (action === "pollute") {
+          toPollute.push(v);
         }
+        // 'ignore' and null are skipped
       });
+
       console.log(
-        "Privacy Guard: User chose to mislead about",
-        selected.length,
-        "items",
+        "Privacy Guard: User submitted -",
+        toDeny.length,
+        "to deny,",
+        toPollute.length,
+        "to pollute",
       );
-      console.log("Privacy Guard: Selected violations:", selected);
+
       modal.remove();
-      resolve({ action: "mislead", violations: selected });
+
+      // If nothing actionable, just resolve as ignore
+      if (toDeny.length === 0 && toPollute.length === 0) {
+        resolve({ action: "ignore" });
+      } else {
+        resolve({
+          action: "submit",
+          toDeny,
+          toPollute,
+        });
+      }
     };
   });
 }

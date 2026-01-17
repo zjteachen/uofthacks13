@@ -6,60 +6,75 @@ const openai = new OpenAI({
 });
 
 // Listen for messages from content script
-chrome.runtime.onMessage.addListener(
-  (request, _sender, sendResponse) => {
-    console.log("Background: Received message:", request.type);
-    if (request.type === "detectPersonalInfo") {
-      detectPersonalInfoWithAI(
-        request.text,
-        request.identity,
-        request.chatHistory
-      )
-        .then((result) => {
-          console.log("Background: Detection complete, sending response");
-          sendResponse({ success: true, data: result });
-        })
-        .catch((error) => {
-          console.error("Background: Detection error:", error);
-          sendResponse({
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+  console.log("Background: Received message:", request.type);
+  if (request.type === "detectPersonalInfo") {
+    detectPersonalInfoWithAI(
+      request.text,
+      request.identity,
+      request.chatHistory,
+    )
+      .then((result) => {
+        console.log("Background: Detection complete, sending response");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Detection error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
         });
-      return true; // Keep channel open for async response
-    } else if (request.type === "rewriteMessage") {
-      console.log("Background: Rewriting message");
-      rewriteMessage(request.text, request.itemsToRemove, request.identity)
-        .then((result) => {
-          console.log("Background: Rewrite complete, sending response");
-          sendResponse({ success: true, data: result });
-        })
-        .catch((error) => {
-          console.error("Background: Rewrite error:", error);
-          sendResponse({
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
+      });
+    return true; // Keep channel open for async response
+  } else if (request.type === "rewriteMessage") {
+    console.log("Background: Rewriting message");
+    rewriteMessage(request.text, request.itemsToRemove, request.identity)
+      .then((result) => {
+        console.log("Background: Rewrite complete, sending response");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Rewrite error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
         });
-      return true;
-    } else if (request.type === "detectPrivacyViolations") {
-      console.log("Background: Detecting privacy violations in response");
-      detectPrivacyViolationsInResponse(request.responseText, request.identity)
-        .then((result) => {
-          console.log("Background: Violation detection complete, sending response");
-          sendResponse({ success: true, data: result });
-        })
-        .catch((error) => {
-          console.error("Background: Violation detection error:", error);
-          sendResponse({
-            success: false,
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
+      });
+    return true;
+  } else if (request.type === "detectPrivacyViolations") {
+    console.log("Background: Detecting privacy violations in response");
+    detectPrivacyViolationsInResponse(request.responseText, request.identity)
+      .then((result) => {
+        console.log(
+          "Background: Violation detection complete, sending response",
+        );
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Violation detection error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
         });
-      return true;
-    }
+      });
+    return true;
+  } else if (request.type === "generateCombinedPollutionMessage") {
+    console.log("Background: Generating combined pollution message");
+    //     generateCombinedPollutionMessage(request.toDeny, request.toPollute)
+    //       .then((result) => {
+    //         console.log("Background: Pollution message generated");
+    //         sendResponse({ success: true, data: result });
+    //       })
+    //       .catch((error) => {
+    //         console.error("Background: Pollution message generation error:", error);
+    //         sendResponse({
+    //           success: false,
+    //           error: error instanceof Error ? error.message : "Unknown error",
+    //         });
+    //       });
+    return true;
   }
-);
+});
 
 function buildDetectionPrompt(identity: any, chatHistory: any[]) {
   if (
@@ -78,7 +93,7 @@ function buildDetectionPrompt(identity: any, chatHistory: any[]) {
               (m: any) =>
                 `${m.role}: ${m.content.substring(0, 200)}${
                   m.content.length > 200 ? "..." : ""
-                }`
+                }`,
             )
             .join("\n")
         : "No previous messages in this conversation.";
@@ -145,7 +160,7 @@ Return ONLY the JSON array, nothing else. If truly nothing sensitive, return []`
 async function detectPersonalInfoWithAI(
   text: string,
   identity: any = null,
-  chatHistory: any[] = []
+  chatHistory: any[] = [],
 ) {
   try {
     console.log("Background: Starting AI detection");
@@ -189,7 +204,7 @@ async function detectPersonalInfoWithAI(
 
 async function detectPrivacyViolationsInResponse(
   responseText: string,
-  identity: any
+  identity: any,
 ) {
   try {
     const characteristicsList = identity.characteristics
@@ -245,7 +260,7 @@ Return ONLY the JSON array, nothing else.`;
 async function rewriteMessage(
   originalText: string,
   itemsToRemove: any[],
-  identity: any = null
+  identity: any = null,
 ) {
   try {
     let identityContext = "";
@@ -287,10 +302,7 @@ Return ONLY the rewritten message text, nothing else.`,
         {
           role: "user",
           content: `Original message: "${originalText}"\n\nRemove these sensitive items:\n${itemsToRemove
-            .map(
-              (item, idx) =>
-                `${idx + 1}. "${item.text}" (${item.reason})`
-            )
+            .map((item, idx) => `${idx + 1}. "${item.text}" (${item.reason})`)
             .join("\n")}`,
         },
       ],
@@ -298,7 +310,8 @@ Return ONLY the rewritten message text, nothing else.`,
       max_tokens: 1000,
     });
 
-    let rewrittenText = completion.choices[0].message.content?.trim() || originalText;
+    let rewrittenText =
+      completion.choices[0].message.content?.trim() || originalText;
 
     if (
       (rewrittenText.startsWith('"') && rewrittenText.endsWith('"')) ||

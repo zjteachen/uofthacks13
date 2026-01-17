@@ -1,0 +1,439 @@
+/* Privacy Guard Modal Styles */
+
+/* Modal Overlay */
+.privacy-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999999;
+  animation: pgFadeIn 0.2s ease-in;
+  backdrop-filter: blur(4px);
+}
+
+@keyframes pgFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Modal Container */
+.privacy-modal-content {
+  background: #2f2f2f;
+  border: 1px solid #565869;
+  border-radius: 16px;
+  padding: 0;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  animation: pgSlideUp 0.3s ease-out;
+}
+
+@keyframes pgSlideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Modal Header */
+.privacy-modal-header {
+  padding: 20px 24px 16px 24px;
+  border-bottom: 1px solid #565869;
+  flex-shrink: 0;
+}
+
+.privacy-modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #ececec;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Modal Body */
+.privacy-modal-body {
+  padding: 20px 24px;
+  color: #c5c5d2;
+  line-height: 1.6;
+  font-size: 14px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.privacy-modal-body > p:first-child {
+  margin: 0 0 16px 0;
+}
+
+/* Loading State */
+.loading-state {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 20px;
+  border: 4px solid #565869;
+  border-top: 4px solid #19c37d;
+  border-radius: 50%;
+  animation: pgSpin 1s linear infinite;
+}
+
+@keyframes pgSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-state p {
+  color: #a0a0a8;
+  margin: 0;
+}
+
+/* Detected Info List */
+.detected-info-list {
+  margin: 0 0 16px 0;
+}
+
+.info-item {
+  background: #3e3e3e;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 14px;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.info-item:hover {
+  background: #454545;
+  border-color: #565869;
+}
+
+.info-item.item-handled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Checkbox Layout (for input monitoring modal) */
+.info-checkbox {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.info-checkbox input[type="checkbox"] {
+  margin-top: 4px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.info-checkbox label {
+  flex: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Info Item Header */
+.info-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.severity-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #2a2a2a;
+  color: #f5d06c;
+}
+
+.info-type {
+  font-size: 12px;
+  color: #a0a0a8;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+/* Info Item Content */
+.info-text {
+  color: #ff6b6b;
+  font-weight: 500;
+  margin-bottom: 6px;
+  font-size: 14px;
+  background: #2a2a2a;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border-left: 3px solid #ef4444;
+  font-family: 'Söhne Mono', Monaco, 'Andale Mono', monospace;
+}
+
+.info-reason {
+  font-size: 13px;
+  color: #c5c5d2;
+  line-height: 1.4;
+}
+
+/* Warning Message */
+.warning-message {
+  background: #3e3020;
+  border: 1px solid #806020;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #f5d06c;
+  margin: 16px 0 0 0 !important;
+}
+
+/* Modal Footer */
+.privacy-modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #565869;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* Base Button Styles */
+.privacy-btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.privacy-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Button Variants */
+.privacy-btn-cancel {
+  background: transparent;
+  color: #ececec;
+  border: 1px solid #565869;
+}
+
+.privacy-btn-cancel:hover:not(:disabled) {
+  background: #40414f;
+}
+
+.privacy-btn-proceed-original {
+  background: #806020;
+  color: #ffffff;
+  border: 1px solid #806020;
+}
+
+.privacy-btn-proceed-original:hover:not(:disabled) {
+  background: #6b5018;
+  border-color: #6b5018;
+}
+
+.privacy-btn-rewrite {
+  background: #19c37d;
+  color: #ffffff;
+  border: 1px solid #19c37d;
+}
+
+.privacy-btn-rewrite:hover:not(:disabled) {
+  background: #17b574;
+  border-color: #17b574;
+}
+
+/* ========================================
+   Context Pollution Modal - Per-Item Actions
+   ======================================== */
+
+/* Per-item action buttons container */
+.violation-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+/* Small action buttons */
+.violation-action-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.violation-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Ignore button */
+.btn-ignore {
+  background: #3e3e3e;
+  color: #a0a0a8;
+  border: 1px solid #565869;
+}
+
+.btn-ignore:hover:not(:disabled) {
+  background: #4a4a4a;
+  color: #c5c5d2;
+}
+
+/* Deny button */
+.btn-deny {
+  background: #806020;
+  color: #ffffff;
+}
+
+.btn-deny:hover:not(:disabled) {
+  background: #6b5018;
+}
+
+/* Pollute button */
+.btn-pollute {
+  background: #19c37d;
+  color: #ffffff;
+}
+
+.btn-pollute:hover:not(:disabled) {
+  background: #17b574;
+}
+
+/* Status indicators for handled items */
+.item-status {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-block;
+}
+
+.status-ignored {
+  background: #3e3e3e;
+  color: #a0a0a8;
+}
+
+.status-denied {
+  background: #3e3020;
+  color: #f5d06c;
+}
+
+.status-polluted {
+  background: #1a3a2a;
+  color: #19c37d;
+}
+
+/* Apply to All section */
+.apply-all-section {
+  border-top: 1px solid #565869;
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+.apply-all-label {
+  font-size: 13px;
+  color: #a0a0a8;
+  margin-bottom: 10px;
+}
+
+/* No violations state */
+.no-violations {
+  text-align: center;
+  padding: 20px;
+  color: #19c37d;
+}
+
+.no-violations-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+/* ========================================
+   Selection Form Styles (Context Pollution)
+   ======================================== */
+
+/* Selection instruction text */
+.selection-instruction {
+  color: #a0a0a8;
+  font-size: 13px;
+  margin: 0 0 16px 0 !important;
+  font-style: italic;
+}
+
+/* Violation item content layout */
+.violation-content {
+  margin-bottom: 10px;
+}
+
+/* Selected state for action buttons */
+.violation-action-btn.selected {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.btn-ignore.selected {
+  background: #565869;
+  color: #fff;
+}
+
+.btn-deny.selected {
+  background: #9a7525;
+  color: #fff;
+}
+
+.btn-pollute.selected {
+  background: #14a368;
+  color: #fff;
+}
+
+/* Apply to all section */
+.apply-all-section {
+  border-top: 1px solid #565869;
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+.apply-all-label {
+  font-size: 13px;
+  color: #a0a0a8;
+  margin-bottom: 10px;
+  display: block;
+}
+
+.apply-all-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Violation item styling */
+.violation-item {
+  display: flex;
+  flex-direction: column;
+}
