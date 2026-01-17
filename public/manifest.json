@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "My Extension",
+  "name": "Privacy Guard for ChatGPT",
   "version": "1.0.0",
-  "description": "A Chrome extension with popup and configuration page",
+  "description": "Detects and warns about personal information before sharing on ChatGPT",
   "icons": {},
   "action": {
     "default_popup": "popup.html",
@@ -10,5 +10,12 @@
   },
   "options_page": "options.html",
   "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://*.chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["content/chatgpt-monitor.js"],
+      "run_at": "document_end"
+    }
+  ],
   "host_permissions": ["https://generativelanguage.googleapis.com/*"]
 }
