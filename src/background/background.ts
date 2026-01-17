@@ -28,7 +28,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true; // Keep channel open for async response
   } else if (request.type === "rewriteMessage") {
     console.log("Background: Rewriting message");
-    rewriteMessage(request.text, request.itemsToRemove, request.identity)
+    rewriteMessage(request.text, request.itemsToRemove)
       .then((result) => {
         console.log("Background: Rewrite complete, sending response");
         sendResponse({ success: true, data: result });
@@ -72,6 +72,43 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     //           error: error instanceof Error ? error.message : "Unknown error",
     //         });
     //       });
+    return true;
+  } else if (request.type === "extractCharacteristics") {
+    console.log("Background: Extracting characteristics from prompt");
+    extractCharacteristicsFromPrompt(
+      request.prompt,
+      request.identityName,
+      request.existingCharacteristics || []
+    )
+      .then((result) => {
+        console.log("Background: Extraction complete, sending response");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Extraction error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      });
+    return true;
+  } else if (request.type === "generateSummary") {
+    console.log("Background: Generating summary from characteristics");
+    generateSummaryFromCharacteristics(
+      request.characteristics,
+      request.identityName
+    )
+      .then((result) => {
+        console.log("Background: Summary generation complete, sending response");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Summary generation error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      });
     return true;
   }
 });
@@ -260,21 +297,8 @@ Return ONLY the JSON array, nothing else.`;
 async function rewriteMessage(
   originalText: string,
   itemsToRemove: any[],
-  identity: any = null,
 ) {
   try {
-    let identityContext = "";
-    if (
-      identity &&
-      identity.characteristics &&
-      identity.characteristics.length > 0
-    ) {
-      const allowedInfo = identity.characteristics
-        .map((c: any) => `${c.name}: ${c.value}`)
-        .join(", ");
-      identityContext = `\n\nIMPORTANT: The user has a privacy profile allowing these details: ${allowedInfo}. When rewriting, you may keep information that matches these allowed characteristics, but remove or generalize the flagged items that go beyond what's allowed.`;
-    }
-
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -321,6 +345,135 @@ Return ONLY the rewritten message text, nothing else.`,
     return rewrittenText;
   } catch (error) {
     console.error("Rewrite error:", error);
+    throw error;
+  }
+}
+
+async function extractCharacteristicsFromPrompt(
+  prompt: string,
+  identityName: string,
+  existingCharacteristics: any[] = [],
+) {
+  try {
+    console.log("Background: Extracting characteristics from prompt");
+
+    const existingCharsText =
+      existingCharacteristics.length > 0
+        ? `\n\nEXISTING CHARACTERISTICS (already extracted):\n${existingCharacteristics.map((c) => `- ${c.name}: ${c.value}`).join("\n")}`
+        : "";
+
+    const systemPrompt = `You are a privacy assistant that extracts key characteristics from identity descriptions.
+
+Your task: Analyze the provided identity description and extract structured characteristics that define what information this person is comfortable sharing.
+
+Return a JSON object with one field:
+- "characteristics": An array of ONLY NEW key-value pairs from the current prompt (do not repeat existing characteristics)
+
+Each characteristic should have:
+- "name": The attribute name (e.g., "Name", "Age", "Location", "Occupation", "Interests", "Education", etc.)
+- "value": The specific value for this identity
+
+Guidelines:
+- Only extract concrete, factual information explicitly stated or strongly implied
+- Keep characteristic names generic and reusable (Name, Age, Location, etc.)
+- Keep values concise but specific
+- Extract 5-15 characteristics depending on the detail provided
+- Common categories: Name, Age, Gender, Location, Occupation, Education, Interests, Hobbies, Skills, Personality traits
+
+Return ONLY the JSON object, nothing else.
+
+Example format:
+{
+  "characteristics": [
+    {"name": "Favorite Food", "value": "Eucalyptus leaves"},
+    {"name": "Age", "value": "2 years old"}
+  ]
+}`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `Identity Name: "${identityName}"${existingCharsText}\n\nNew Description to Extract From:\n${prompt}`,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 1500,
+    });
+
+    const content = completion.choices[0].message.content?.trim() || "{}";
+    console.log("Background: Extraction response received");
+
+    const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
+    const result = JSON.parse(jsonContent);
+
+    // Ensure characteristics have IDs
+    if (result.characteristics) {
+      result.characteristics = result.characteristics.map(
+        (char: any, idx: number) => ({
+          id: `char-${Date.now()}-${idx}`,
+          name: char.name,
+          value: char.value,
+        }),
+      );
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Background: Characteristic extraction error:", error);
+    throw error;
+  }
+}
+
+async function generateSummaryFromCharacteristics(
+  characteristics: any[],
+  identityName: string,
+) {
+  try {
+    console.log("Background: Generating summary from characteristics");
+
+    if (!characteristics || characteristics.length === 0) {
+      return { summary: "No characteristics defined yet." };
+    }
+
+    const characteristicsList = characteristics
+      .map((c) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+
+    const systemPrompt = `You are a privacy assistant that creates concise identity summaries.
+
+Your task: Given a list of characteristics about a person, create a natural, concise 2-3 sentence summary that captures the essence of who they are.
+
+Guidelines:
+- Write in third person
+- Be concise but comprehensive
+- Highlight the most defining characteristics
+- Make it flow naturally as a paragraph
+- Focus on what makes this identity unique
+
+Return ONLY the summary text, nothing else. No JSON, no quotes, just the summary paragraph.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `Identity Name: "${identityName}"\n\nCharacteristics:\n${characteristicsList}`,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 300,
+    });
+
+    const summary = completion.choices[0].message.content?.trim() || "";
+    console.log("Background: Summary generation response received");
+
+    return { summary };
+  } catch (error) {
+    console.error("Background: Summary generation error:", error);
     throw error;
   }
 }
