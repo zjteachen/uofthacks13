@@ -9,5 +9,6 @@
     "default_icon": {}
   },
   "options_page": "options.html",
-  "permissions": ["storage"]
+  "permissions": ["storage"],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*"]
 }

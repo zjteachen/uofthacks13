@@ -1,0 +1,22 @@
+export const PREDEFINED_ATTRIBUTES = [
+  'Age',
+  'Gender',
+  'Occupation',
+  'Nationality',
+  'Ethnicity',
+  'Religion',
+  'Education',
+  'Marital Status',
+  'Location',
+  'Language',
+  'Socioeconomic Status',
+  'Political Affiliation',
+  'Personality Type',
+  'Hobby',
+  'Disability Status',
+  'Sexual Orientation',
+  'Family Status',
+  'Employment Type',
+  'Income Level',
+  'Custom Attribute'
+];
