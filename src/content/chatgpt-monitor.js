@@ -809,6 +809,7 @@ async function analyzeAssistantResponse(responseText) {
     "Privacy Guard: Analyzing assistant response against identity:",
     identity.name,
   );
+  console.log("Identity Details:", identity);
 
   const violations = await detectPrivacyViolationsInResponse(
     responseText,
@@ -885,8 +886,7 @@ function setupResponseMonitoring() {
     try {
       const responseText = latestMessage.textContent?.trim() || "";
       if (responseText) {
-        // await analyzeAssistantResponse(responseText);
-        console.log("Would trigger response analysis here");
+        await analyzeAssistantResponse(responseText);
       }
     } finally {
       processingResponse = false;
