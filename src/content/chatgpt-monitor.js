@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 
 // OpenAI API Configuration
 const openai = new OpenAI({
-  apiKey: 'API-KEY',
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
   dangerouslyAllowBrowser: true
 });
 
