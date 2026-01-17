@@ -1,10 +1,31 @@
+import OpenAI from "openai";
+
+// ==========================================
+// FEATURE TOGGLES (for testing/debugging)
+// ==========================================
+const ENABLE_INPUT_MONITORING = true; // Monitor outgoing messages for personal info
+const ENABLE_RESPONSE_MONITORING = true; // Monitor AI responses for privacy violations
+const ENABLE_VERBOSE_LOGGING = true; // Reduce console spam when false
+
+// OpenAI API Configuration
+const openai = new OpenAI({
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true,
+});
+
 // Store the current textarea being monitored
 let currentTextarea = null;
 let approvedMessages = new Set();
 let currentSendButton = null;
 let currentForm = null;
 
-console.log("Privacy Guard: Content script loaded on", window.location.hostname);
+console.log(
+  "Privacy Guard: Content script loaded on",
+  window.location.hostname,
+);
+// Response monitoring state
+let lastProcessedMessageId = null;
+let processingResponse = false;
 
 // Fetch the selected identity from chrome storage
 async function getSelectedIdentity() {
@@ -62,7 +83,7 @@ async function detectPersonalInfoWithAI(
           console.error("Privacy Guard: AI detection error:", response.error);
           resolve([]);
         }
-      }
+      },
     );
   });
 }
@@ -84,7 +105,7 @@ async function rewriteMessage(originalText, itemsToRemove, identity = null) {
           console.error("Privacy Guard: Rewrite error:", response.error);
           reject(new Error(response.error));
         }
-      }
+      },
     );
   });
 }
@@ -522,6 +543,14 @@ function hashString(str) {
 
 // Check if the submit button was clicked
 async function interceptSubmission(textarea, shouldAutoSubmit = false) {
+  // Skip if input monitoring is disabled
+  if (!ENABLE_INPUT_MONITORING) {
+    return {
+      proceed: true,
+      text: textarea.value || textarea.textContent || "",
+    };
+  }
+
   const text =
     textarea.value || textarea.textContent || textarea.innerText || "";
   const textHash = hashString(text);
@@ -609,6 +638,284 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
   }
 }
 
+// ==========================================
+// RESPONSE MONITORING & CONTEXT POLLUTION
+// ==========================================
+
+// Wait for ChatGPT response to finish streaming
+async function waitForMessageComplete(element) {
+  let previousContent = "";
+  let stableCount = 0;
+
+  while (stableCount < 3) {
+    await new Promise((r) => setTimeout(r, 500));
+    const currentContent = element.textContent || "";
+
+    if (currentContent === previousContent) {
+      stableCount++;
+    } else {
+      stableCount = 0;
+      previousContent = currentContent;
+    }
+  }
+}
+
+// Detect privacy violations in AI response
+async function detectPrivacyViolationsInResponse(responseText, identity) {
+  try {
+    const characteristicsList = identity.characteristics
+      .map((c) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+
+    const systemPrompt = `You are a privacy auditor. Analyze the AI assistant's response to detect if it reveals that it KNOWS information about the user that goes BEYOND their allowed privacy profile.
+
+PRIVACY PROFILE: "${identity.name}"
+Information the user has chosen to share:
+${characteristicsList}
+
+AI RESPONSE TO ANALYZE:
+${responseText}
+
+Your task: Identify any statements where the AI demonstrates knowledge of user information that is:
+1. MORE SPECIFIC than what's in the profile (e.g., profile says "Canada" but AI mentions "Toronto")
+2. NOT COVERED by any characteristic in the profile (e.g., AI mentions user's email but no email in profile)
+3. INFERRED beyond what was explicitly shared (e.g., AI assumes user's age from context)
+
+Return a JSON array of violations. Each item must have:
+- "knownInfo": what the AI claims to know (exact quote or paraphrase)
+- "category": "location", "personal_detail", "interest", "behavior", "relationship", etc.
+- "reason": why this exceeds the allowed profile
+- "severity": "high" (specific identifiers), "medium" (detailed inference), "low" (vague assumption)
+
+Return [] if the AI only references information within the allowed profile bounds.
+Return ONLY the JSON array, nothing else.`;
+
+    console.log("Privacy Guard: Analyzing response for violations...");
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: responseText },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    });
+
+    const content = completion.choices[0].message.content.trim();
+    console.log("Privacy Guard: Violation detection response:", content);
+
+    const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
+    return JSON.parse(jsonContent);
+  } catch (error) {
+    console.error("Privacy Guard: Violation detection error:", error);
+    return [];
+  }
+}
+
+// Show context pollution modal (display only for now)
+function showContextPollutionModal(violations, identity) {
+  // Remove existing modal if present
+  const existingModal = document.getElementById("context-pollution-modal");
+  if (existingModal) {
+    existingModal.remove();
+  }
+
+  const severityEmoji = {
+    high: "🔴",
+    medium: "🟡",
+    low: "🟢",
+  };
+
+  const modal = document.createElement("div");
+  modal.id = "context-pollution-modal";
+
+  modal.innerHTML = `
+    <div class="privacy-modal-overlay">
+      <div class="privacy-modal-content">
+        <div class="privacy-modal-header">
+          <h2>⚠️ AI Knows More Than Expected</h2>
+        </div>
+        <div class="privacy-modal-body">
+          <p>The AI's response indicates it knows information beyond your privacy profile "${identity.name}":</p>
+          <div class="detected-info-list">
+            ${violations
+              .map(
+                (v, idx) => `
+              <div class="info-item" data-index="${idx}">
+                <div class="info-checkbox">
+                  <input type="checkbox" id="pollute-${idx}" checked>
+                  <label for="pollute-${idx}">
+                    <div class="info-header">
+                      <span class="severity-badge">${severityEmoji[v.severity] || "🟡"} ${(v.severity || "medium").toUpperCase()}</span>
+                      <span class="info-type">${v.category || "Unknown"}</span>
+                    </div>
+                    <div class="info-text">"${v.knownInfo}"</div>
+                    <div class="info-reason">${v.reason}</div>
+                  </label>
+                </div>
+              </div>
+            `,
+              )
+              .join("")}
+          </div>
+          <p class="warning-message">⚠️ Select items to "pollute" - we can send a message to mislead the AI about this information.</p>
+        </div>
+        <div class="privacy-modal-footer">
+          <button id="pollution-ignore-btn" class="privacy-btn privacy-btn-cancel">Ignore</button>
+          <button id="pollution-deny-btn" class="privacy-btn privacy-btn-proceed-original">Deny Knowledge</button>
+          <button id="pollution-mislead-btn" class="privacy-btn privacy-btn-rewrite">Mislead with Fake Data</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  console.log(
+    "Privacy Guard: Context pollution modal shown with",
+    violations.length,
+    "violations",
+  );
+
+  return new Promise((resolve) => {
+    modal.querySelector("#pollution-ignore-btn").onclick = () => {
+      console.log("Privacy Guard: User chose to ignore violations");
+      modal.remove();
+      resolve({ action: "ignore" });
+    };
+
+    modal.querySelector("#pollution-deny-btn").onclick = () => {
+      const selected = [];
+      violations.forEach((v, idx) => {
+        const checkbox = modal.querySelector(`#pollute-${idx}`);
+        if (checkbox && checkbox.checked) {
+          selected.push(v);
+        }
+      });
+      console.log(
+        "Privacy Guard: User chose to deny",
+        selected.length,
+        "items",
+      );
+      console.log("Privacy Guard: Selected violations:", selected);
+      modal.remove();
+      resolve({ action: "deny", violations: selected });
+    };
+
+    modal.querySelector("#pollution-mislead-btn").onclick = () => {
+      const selected = [];
+      violations.forEach((v, idx) => {
+        const checkbox = modal.querySelector(`#pollute-${idx}`);
+        if (checkbox && checkbox.checked) {
+          selected.push(v);
+        }
+      });
+      console.log(
+        "Privacy Guard: User chose to mislead about",
+        selected.length,
+        "items",
+      );
+      console.log("Privacy Guard: Selected violations:", selected);
+      modal.remove();
+      resolve({ action: "mislead", violations: selected });
+    };
+  });
+}
+
+// Analyze assistant response for privacy violations
+async function analyzeAssistantResponse(responseText) {
+  const identity = await getSelectedIdentity();
+  if (!identity) {
+    console.log(
+      "Privacy Guard: No identity selected, skipping response analysis",
+    );
+    return;
+  }
+
+  console.log(
+    "Privacy Guard: Analyzing assistant response against identity:",
+    identity.name,
+  );
+
+  const violations = await detectPrivacyViolationsInResponse(
+    responseText,
+    identity,
+  );
+
+  console.log(
+    "Privacy Guard: Found",
+    violations.length,
+    "privacy violations in response",
+  );
+
+  if (violations.length > 0) {
+    const result = await showContextPollutionModal(violations, identity);
+    console.log("Privacy Guard: User action:", result.action);
+    // TODO: Implement actual pollution message sending in next phase
+  }
+}
+
+// Set up monitoring for assistant responses
+function setupResponseMonitoring() {
+  const chatContainer = document.querySelector("main") || document.body;
+
+  // Skip setup if response monitoring is disabled
+  if (!ENABLE_RESPONSE_MONITORING) {
+    console.log("Privacy Guard: Response monitoring disabled");
+    return;
+  }
+
+  console.log("Privacy Guard: Setting up response monitoring...");
+
+  const responseObserver = new MutationObserver(async (mutations) => {
+    if (processingResponse) return;
+
+    // Find all assistant messages
+    const assistantMessages = document.querySelectorAll(
+      "[data-message-author-role='assistant']",
+    );
+
+    if (assistantMessages.length === 0) return;
+
+    const latestMessage = assistantMessages[assistantMessages.length - 1];
+    const messageId =
+      latestMessage.getAttribute("data-message-id") ||
+      latestMessage.textContent?.substring(0, 50);
+
+    // Skip if already processed
+    if (messageId === lastProcessedMessageId) return;
+
+    // Wait for message to finish streaming
+    if (ENABLE_VERBOSE_LOGGING) {
+      console.log(
+        "Privacy Guard: New assistant message detected, waiting for completion...",
+      );
+    }
+    await waitForMessageComplete(latestMessage);
+
+    lastProcessedMessageId = messageId;
+    processingResponse = true;
+    return;
+    try {
+      const responseText = latestMessage.textContent?.trim() || "";
+      if (responseText) {
+        await analyzeAssistantResponse(responseText);
+      }
+    } finally {
+      processingResponse = false;
+    }
+  });
+
+  responseObserver.observe(chatContainer, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
+
+  console.log("Privacy Guard: Response monitoring initialized");
+}
+
 // Monitor the ChatGPT input
 function monitorChatGPTInput() {
   console.log("Privacy Guard: Initializing...");
@@ -620,11 +927,11 @@ function monitorChatGPTInput() {
       // ChatGPT selectors (priority)
       "textarea[data-id]",
       "#prompt-textarea",
-      
+
       // Gemini selectors (priority)
       "div[contenteditable='true'][data-testid*='message']",
       "div[data-inner-editor-container]",
-      
+
       // Generic selectors (works for both)
       'textarea[aria-label*="message"]',
       'textarea[placeholder*="Message"]',
@@ -638,8 +945,11 @@ function monitorChatGPTInput() {
 
     for (const selector of selectors) {
       const el = document.querySelector(selector);
-      if (el && el.offsetParent !== null) { // Also check if visible
-        console.log("Privacy Guard: Found input with selector:", selector);
+      if (el && el.offsetParent !== null) {
+        // Also check if visible
+        if (ENABLE_VERBOSE_LOGGING) {
+          console.log("Privacy Guard: Found input with selector:", selector);
+        }
         return el;
       }
     }
@@ -708,10 +1018,12 @@ function monitorChatGPTInput() {
       // Gemini uses .send-button class - try this first
       const geminiSendBtn = document.querySelector("button.send-button");
       if (geminiSendBtn && geminiSendBtn.offsetParent !== null) {
-        console.log("Privacy Guard: Found Gemini send button with .send-button class");
+        console.log(
+          "Privacy Guard: Found Gemini send button with .send-button class",
+        );
         return geminiSendBtn;
       }
-      
+
       const buttons = document.querySelectorAll("button");
       for (const btn of buttons) {
         const hasDataTestId = btn.getAttribute("data-testid") === "send-button";
@@ -719,16 +1031,16 @@ function monitorChatGPTInput() {
         const hasMatIcon = btn.querySelector("mat-icon");
         const ariaLabel = btn.getAttribute("aria-label") || "";
         const title = btn.getAttribute("title") || "";
-        
+
         // Check various send button indicators
         const isAriaLabel = ariaLabel.toLowerCase().includes("send");
         const isTitle = title.toLowerCase().includes("send");
         const isVisible = btn.offsetParent !== null; // Not hidden
         const hasIcon = (hasSvg || hasMatIcon) && btn.textContent.trim() === "";
-        
+
         // Gemini: Look for button with icon near textarea
         const nearTextarea = input && input.parentElement?.contains(btn);
-        
+
         if (
           hasDataTestId ||
           (hasIcon && isVisible) ||
@@ -736,7 +1048,14 @@ function monitorChatGPTInput() {
           isTitle ||
           (nearTextarea && isVisible && (hasSvg || hasMatIcon))
         ) {
-          console.log("Privacy Guard: Send button candidate found with aria-label:", ariaLabel, "title:", title, "hasIcon:", hasIcon);
+          console.log(
+            "Privacy Guard: Send button candidate found with aria-label:",
+            ariaLabel,
+            "title:",
+            title,
+            "hasIcon:",
+            hasIcon,
+          );
           return btn;
         }
       }
@@ -751,16 +1070,19 @@ function monitorChatGPTInput() {
         "click",
         async (e) => {
           console.log("Privacy Guard: Send button clicked");
-          
+
           // Check if message is already approved (from rewrite)
-          const text = currentTextarea.value || currentTextarea.textContent || "";
+          const text =
+            currentTextarea.value || currentTextarea.textContent || "";
           const textHash = hashString(text);
-          
+
           if (approvedMessages.has(textHash)) {
-            console.log("Privacy Guard: Message already approved, allowing click to proceed");
+            console.log(
+              "Privacy Guard: Message already approved, allowing click to proceed",
+            );
             return; // Let the original click happen
           }
-          
+
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
@@ -771,7 +1093,7 @@ function monitorChatGPTInput() {
             console.log("Privacy Guard: User cancelled, not submitting");
             return false;
           }
-          
+
           console.log("Privacy Guard: User approved, now actually submitting");
           // The message text may have been rewritten, but we still need to click the button
           // Actually click the send button for real this time
@@ -789,7 +1111,7 @@ function monitorChatGPTInput() {
   setupMonitoring();
 
   // Re-check periodically as ChatGPT might dynamically create new textareas
-  setInterval(setupMonitoring, 2000);
+  // setInterval(setupMonitoring, 2000);
 
   // Also observe DOM changes
   const observer = new MutationObserver(() => {
@@ -803,9 +1125,13 @@ function monitorChatGPTInput() {
 
 // Initialize when DOM is ready
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", monitorChatGPTInput);
+  document.addEventListener("DOMContentLoaded", () => {
+    monitorChatGPTInput();
+    setupResponseMonitoring();
+  });
 } else {
   monitorChatGPTInput();
+  setupResponseMonitoring();
 }
 
 console.log("Privacy Guard: Content script loaded for ChatGPT");
