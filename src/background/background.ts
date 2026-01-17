@@ -42,6 +42,21 @@ chrome.runtime.onMessage.addListener(
           });
         });
       return true;
+    } else if (request.type === "detectPrivacyViolations") {
+      console.log("Background: Detecting privacy violations in response");
+      detectPrivacyViolationsInResponse(request.responseText, request.identity)
+        .then((result) => {
+          console.log("Background: Violation detection complete, sending response");
+          sendResponse({ success: true, data: result });
+        })
+        .catch((error) => {
+          console.error("Background: Violation detection error:", error);
+          sendResponse({
+            success: false,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+        });
+      return true;
     }
   }
 );
@@ -168,6 +183,61 @@ async function detectPersonalInfoWithAI(
     return detected;
   } catch (error) {
     console.error("Background: AI detection error:", error);
+    throw error;
+  }
+}
+
+async function detectPrivacyViolationsInResponse(
+  responseText: string,
+  identity: any
+) {
+  try {
+    const characteristicsList = identity.characteristics
+      .map((c: any) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+
+    const systemPrompt = `You are a privacy auditor. Analyze the AI assistant's response to detect if it reveals that it KNOWS information about the user that goes BEYOND their allowed privacy profile.
+
+PRIVACY PROFILE: "${identity.name}"
+Information the user has chosen to share:
+${characteristicsList}
+
+AI RESPONSE TO ANALYZE:
+${responseText}
+
+Your task: Identify any statements where the AI demonstrates knowledge of user information that is:
+1. MORE SPECIFIC than what's in the profile (e.g., profile says "Canada" but AI mentions "Toronto")
+2. NOT COVERED by any characteristic in the profile (e.g., AI mentions user's email but no email in profile)
+3. INFERRED beyond what was explicitly shared (e.g., AI assumes user's age from context)
+
+Return a JSON array of violations. Each item must have:
+- "knownInfo": what the AI claims to know (exact quote or paraphrase)
+- "category": "location", "personal_detail", "interest", "behavior", "relationship", etc.
+- "reason": why this exceeds the allowed profile
+- "severity": "high" (specific identifiers), "medium" (detailed inference), "low" (vague assumption)
+
+Return [] if the AI only references information within the allowed profile bounds.
+Return ONLY the JSON array, nothing else.`;
+
+    console.log("Background: Analyzing response for violations...");
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: responseText },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    });
+
+    const content = completion.choices[0].message.content?.trim() || "[]";
+    console.log("Background: Violation detection response received");
+
+    const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
+    return JSON.parse(jsonContent);
+  } catch (error) {
+    console.error("Background: Violation detection error:", error);
     throw error;
   }
 }

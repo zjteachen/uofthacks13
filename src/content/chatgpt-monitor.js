@@ -1,17 +1,9 @@
-import OpenAI from "openai";
-
 // ==========================================
 // FEATURE TOGGLES (for testing/debugging)
 // ==========================================
 const ENABLE_INPUT_MONITORING = true; // Monitor outgoing messages for personal info
 const ENABLE_RESPONSE_MONITORING = true; // Monitor AI responses for privacy violations
-const ENABLE_VERBOSE_LOGGING = true; // Reduce console spam when false
-
-// OpenAI API Configuration
-const openai = new OpenAI({
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
+const ENABLE_VERBOSE_LOGGING = false; // Reduce console spam when false
 
 // Store the current textarea being monitored
 let currentTextarea = null;
@@ -26,6 +18,7 @@ console.log(
 // Response monitoring state
 let lastProcessedMessageId = null;
 let processingResponse = false;
+let responseObserver = null; // Track the observer to prevent duplicates
 
 // Fetch the selected identity from chrome storage
 async function getSelectedIdentity() {
@@ -660,57 +653,36 @@ async function waitForMessageComplete(element) {
   }
 }
 
-// Detect privacy violations in AI response
+// Detect privacy violations in AI response (via background service worker)
 async function detectPrivacyViolationsInResponse(responseText, identity) {
-  try {
-    const characteristicsList = identity.characteristics
-      .map((c) => `- ${c.name}: ${c.value}`)
-      .join("\n");
-
-    const systemPrompt = `You are a privacy auditor. Analyze the AI assistant's response to detect if it reveals that it KNOWS information about the user that goes BEYOND their allowed privacy profile.
-
-PRIVACY PROFILE: "${identity.name}"
-Information the user has chosen to share:
-${characteristicsList}
-
-AI RESPONSE TO ANALYZE:
-${responseText}
-
-Your task: Identify any statements where the AI demonstrates knowledge of user information that is:
-1. MORE SPECIFIC than what's in the profile (e.g., profile says "Canada" but AI mentions "Toronto")
-2. NOT COVERED by any characteristic in the profile (e.g., AI mentions user's email but no email in profile)
-3. INFERRED beyond what was explicitly shared (e.g., AI assumes user's age from context)
-
-Return a JSON array of violations. Each item must have:
-- "knownInfo": what the AI claims to know (exact quote or paraphrase)
-- "category": "location", "personal_detail", "interest", "behavior", "relationship", etc.
-- "reason": why this exceeds the allowed profile
-- "severity": "high" (specific identifiers), "medium" (detailed inference), "low" (vague assumption)
-
-Return [] if the AI only references information within the allowed profile bounds.
-Return ONLY the JSON array, nothing else.`;
-
-    console.log("Privacy Guard: Analyzing response for violations...");
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: responseText },
-      ],
-      temperature: 0.2,
-      max_tokens: 1500,
-    });
-
-    const content = completion.choices[0].message.content.trim();
-    console.log("Privacy Guard: Violation detection response:", content);
-
-    const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
-    return JSON.parse(jsonContent);
-  } catch (error) {
-    console.error("Privacy Guard: Violation detection error:", error);
-    return [];
-  }
+  return new Promise((resolve) => {
+    console.log(
+      "Privacy Guard: Sending violation detection request to background...",
+    );
+    chrome.runtime.sendMessage(
+      {
+        type: "detectPrivacyViolations",
+        responseText,
+        identity,
+      },
+      (response) => {
+        if (response && response.success) {
+          console.log(
+            "Privacy Guard: Violation detection complete, found",
+            response.data.length,
+            "violations",
+          );
+          resolve(response.data);
+        } else {
+          console.error(
+            "Privacy Guard: Violation detection error:",
+            response?.error,
+          );
+          resolve([]);
+        }
+      },
+    );
+  });
 }
 
 // Show context pollution modal (display only for now)
@@ -858,25 +830,36 @@ async function analyzeAssistantResponse(responseText) {
 
 // Set up monitoring for assistant responses
 function setupResponseMonitoring() {
-  const chatContainer = document.querySelector("main") || document.body;
-
   // Skip setup if response monitoring is disabled
   if (!ENABLE_RESPONSE_MONITORING) {
     console.log("Privacy Guard: Response monitoring disabled");
     return;
   }
 
+  // Disconnect existing observer if one exists (prevent duplicates)
+  if (responseObserver) {
+    console.log("Privacy Guard: Disconnecting existing response observer");
+    responseObserver.disconnect();
+    responseObserver = null;
+  }
+
+  const chatContainer = document.querySelector("main") || document.body;
+
   console.log("Privacy Guard: Setting up response monitoring...");
 
-  const responseObserver = new MutationObserver(async (mutations) => {
+  responseObserver = new MutationObserver(async (mutations) => {
     if (processingResponse) return;
+    processingResponse = true;
 
     // Find all assistant messages
     const assistantMessages = document.querySelectorAll(
       "[data-message-author-role='assistant']",
     );
 
-    if (assistantMessages.length === 0) return;
+    if (assistantMessages.length === 0) {
+      processingResponse = false;
+      return;
+    }
 
     const latestMessage = assistantMessages[assistantMessages.length - 1];
     const messageId =
@@ -884,7 +867,10 @@ function setupResponseMonitoring() {
       latestMessage.textContent?.substring(0, 50);
 
     // Skip if already processed
-    if (messageId === lastProcessedMessageId) return;
+    if (messageId === lastProcessedMessageId) {
+      processingResponse = false;
+      return;
+    }
 
     // Wait for message to finish streaming
     if (ENABLE_VERBOSE_LOGGING) {
@@ -895,12 +881,12 @@ function setupResponseMonitoring() {
     await waitForMessageComplete(latestMessage);
 
     lastProcessedMessageId = messageId;
-    processingResponse = true;
-    return;
+
     try {
       const responseText = latestMessage.textContent?.trim() || "";
       if (responseText) {
-        await analyzeAssistantResponse(responseText);
+        // await analyzeAssistantResponse(responseText);
+        console.log("Would trigger response analysis here");
       }
     } finally {
       processingResponse = false;
