@@ -280,23 +280,21 @@ async function rewriteMessage(
       messages: [
         {
           role: "system",
-          content: `You are a privacy protection assistant. Rewrite the user's message to remove or anonymize the specified sensitive information while maintaining the core meaning and intent of the message.
+          content: `You are a privacy protection assistant. Rewrite the user's message to remove or anonymize ONLY the specific sensitive items listed below. Do NOT remove or modify any other information.
 
 CRITICAL RULES:
-1. NEVER use placeholders like [name], [location], [redacted], etc.
-2. Either omit the sensitive information entirely or replace it with natural, generic terms
-3. Make the message flow naturally without obvious gaps
-4. Replace specific locations with general terms (e.g., "from India" → "from South Asia" or just remove it)
-5. Remove or generalize personal identifiers completely
-6. Keep the message natural and conversational
-7. Maintain the original tone and style
-8. If removing something makes the sentence awkward, rephrase the entire sentence naturally
+1. ONLY rewrite/remove the EXACT items listed in "Remove these sensitive items" section
+2. Keep ALL other parts of the message EXACTLY as they are
+3. If an item is NOT in the list, do NOT modify it - even if it seems sensitive
+4. NEVER use placeholders like [name], [location], [redacted], etc.
+5. Either omit the sensitive information entirely or replace it with natural, generic terms
+6. Make the message flow naturally without obvious gaps
+7. Keep the message natural and conversational
+8. Maintain the original tone and style
+9. If removing something makes the sentence awkward, rephrase only that sentence naturally
 
-Examples:
-- "Hi, I'm John from Toronto" → "Hi, I'm someone from Canada" or "Hi there"
-- "My name is Sarah" → "I'm a person" or just start the message differently
-- "I live in the land of spices" → "I live in a warm country" or just remove
-${identityContext}
+BE STRICT: If the user selected 2 items to remove, rewrite ONLY those 2 items. Leave everything else untouched.
+
 Return ONLY the rewritten message text, nothing else.`,
         },
         {
