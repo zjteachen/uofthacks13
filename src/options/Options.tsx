@@ -1,9 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+
+interface Settings {
+  exampleText: string;
+  exampleToggle: boolean;
+}
 
 function Options() {
-  const [exampleText, setExampleText] = useState('');
-  const [exampleToggle, setExampleToggle] = useState(false);
-  const [status, setStatus] = useState('');
+  const [exampleText, setExampleText] = useState<string>('');
+  const [exampleToggle, setExampleToggle] = useState<boolean>(false);
+  const [status, setStatus] = useState<string>('');
 
   useEffect(() => {
     // Load saved settings
@@ -14,7 +19,7 @@ function Options() {
   }, []);
 
   const handleSave = () => {
-    const settings = {
+    const settings: Settings = {
       exampleText,
       exampleToggle
     };
