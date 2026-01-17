@@ -1,72 +1,132 @@
 import { useState, useEffect } from 'react';
-
-interface Settings {
-  exampleText: string;
-  exampleToggle: boolean;
-}
+import { Identity } from '../types/identity';
+import IdentityMenu from './IdentityMenu';
+import IdentityEditor from './IdentityEditor';
+import './Options.css';
 
 function Options() {
-  const [exampleText, setExampleText] = useState<string>('');
-  const [exampleToggle, setExampleToggle] = useState<boolean>(false);
-  const [status, setStatus] = useState<string>('');
+  const [identities, setIdentities] = useState<Identity[]>([]);
+  const [selectedId, setSelectedId] = useState<string | undefined>();
 
   useEffect(() => {
-    // Load saved settings
-    chrome.storage.sync.get(['exampleText', 'exampleToggle'], (result) => {
-      setExampleText(result.exampleText || '');
-      setExampleToggle(result.exampleToggle || false);
+    // Load identities from Chrome storage
+    chrome.storage.sync.get(['identities', 'selectedId'], async (result: any) => {
+      if (result.identities && Array.isArray(result.identities)) {
+        // Load profile pictures from local storage
+        const identitiesWithImages = await Promise.all(
+          result.identities.map(async (identity: any) => {
+            const imageData = await chrome.storage.local.get(`image_${identity.id}`);
+            return {
+              ...identity,
+              profilePicture: imageData[`image_${identity.id}`] || '',
+              prompt: identity.prompt || ''
+            };
+          })
+        );
+        setIdentities(identitiesWithImages);
+        setSelectedId(result.selectedId);
+      }
     });
   }, []);
 
-  const handleSave = () => {
-    const settings: Settings = {
-      exampleText,
-      exampleToggle
+  const handleAddIdentity = () => {
+    const newIdentity: Identity = {
+      id: Date.now().toString(),
+      name: 'New Identity',
+      profilePicture: '',
+      prompt: '',
+      createdAt: Date.now()
     };
 
-    chrome.storage.sync.set(settings, () => {
-      setStatus('Settings saved!');
-      setTimeout(() => {
-        setStatus('');
-      }, 2000);
+    const updatedIdentities = [...identities, newIdentity];
+    setIdentities(updatedIdentities);
+    setSelectedId(newIdentity.id);
+    saveToStorage(updatedIdentities, newIdentity.id);
+  };
+
+  const handleSelectIdentity = (id: string) => {
+    setSelectedId(id);
+    chrome.storage.sync.set({ selectedId: id });
+  };
+
+  const handleDeleteIdentity = (id: string) => {
+    const updatedIdentities = identities.filter(i => i.id !== id);
+    setIdentities(updatedIdentities);
+
+    if (selectedId === id) {
+      const newSelectedId = updatedIdentities[0]?.id;
+      setSelectedId(newSelectedId);
+      saveToStorage(updatedIdentities, newSelectedId);
+    } else {
+      saveToStorage(updatedIdentities, selectedId);
+    }
+  };
+
+  const handleSaveIdentity = (updatedIdentity: Identity) => {
+    const updatedIdentities = identities.map(i =>
+      i.id === updatedIdentity.id ? updatedIdentity : i
+    );
+    setIdentities(updatedIdentities);
+
+    // Save image separately to local storage
+    if (updatedIdentity.profilePicture) {
+      chrome.storage.local.set({
+        [`image_${updatedIdentity.id}`]: updatedIdentity.profilePicture
+      });
+    }
+
+    // Save metadata to sync storage (without large image data)
+    const identitiesForSync = updatedIdentities.map(({ profilePicture, ...rest }) => ({
+      ...rest,
+      profilePicture: '' // Empty string to match Identity interface
+    }));
+    
+    chrome.storage.sync.set({
+      identities: identitiesForSync,
+      selectedId: selectedId
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Failed to save identity:', chrome.runtime.lastError);
+      }
     });
   };
 
+  const handleNameChange = (name: string) => {
+    if (selectedId) {
+      const updatedIdentities = identities.map(i =>
+        i.id === selectedId ? { ...i, name } : i
+      );
+      setIdentities(updatedIdentities);
+    }
+  };
+
+  const saveToStorage = (ids: Identity[], selected?: string) => {
+    chrome.storage.sync.set({
+      identities: ids,
+      selectedId: selected
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Failed to save to storage:', chrome.runtime.lastError);
+      }
+    });
+  };
+
+  const selectedIdentity = identities.find(i => i.id === selectedId) || null;
+
   return (
-    <div className="container">
-      <h1>Settings</h1>
-
-      <div className="section">
-        <h2>General</h2>
-
-        <div className="setting">
-          <label htmlFor="exampleText">Example Text Setting</label>
-          <input
-            type="text"
-            id="exampleText"
-            placeholder="Enter value..."
-            value={exampleText}
-            onChange={(e) => setExampleText(e.target.value)}
-          />
-        </div>
-
-        <div className="setting">
-          <label htmlFor="exampleToggle">
-            <input
-              type="checkbox"
-              id="exampleToggle"
-              checked={exampleToggle}
-              onChange={(e) => setExampleToggle(e.target.checked)}
-            />
-            Enable feature
-          </label>
-        </div>
-      </div>
-
-      <div className="actions">
-        <button onClick={handleSave}>Save Settings</button>
-        <span id="status">{status}</span>
-      </div>
+    <div className="options-container">
+      <IdentityMenu
+        identities={identities}
+        selectedId={selectedId}
+        onSelectIdentity={handleSelectIdentity}
+        onAddIdentity={handleAddIdentity}
+        onDeleteIdentity={handleDeleteIdentity}
+      />
+      <IdentityEditor
+        identity={selectedIdentity}
+        onSave={handleSaveIdentity}
+        onNameChange={handleNameChange}
+      />
     </div>
   );
 }
