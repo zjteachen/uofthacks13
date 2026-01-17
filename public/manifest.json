@@ -16,5 +16,6 @@
       "js": ["content/chatgpt-monitor.js"],
       "run_at": "document_end"
     }
-  ]
+  ],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*"]
 }

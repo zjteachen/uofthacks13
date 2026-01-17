@@ -1,5 +1,3 @@
-import React from 'react';
-
 function Popup() {
   const handleOpenOptions = () => {
     chrome.runtime.openOptionsPage();
