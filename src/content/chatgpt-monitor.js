@@ -3,13 +3,28 @@
 // ==========================================
 const ENABLE_INPUT_MONITORING = true; // Monitor outgoing messages for personal info
 const ENABLE_RESPONSE_MONITORING = true; // Monitor AI responses for privacy violations
+const ENABLE_CONTEXT_AUGMENTATION = true; // Auto-add identity context to prompts when needed
 const ENABLE_VERBOSE_LOGGING = false; // Reduce console spam when false
 
 // Store the current textarea being monitored
 let currentTextarea = null;
 let approvedMessages = new Set();
+let contextAugmentedMessages = new Set(); // Track messages we've already augmented
 let currentSendButton = null;
 let currentForm = null;
+let extensionContextValid = true;
+let isProgrammaticSubmit = false; // Flag to track programmatic submits
+
+// Helper to check if extension context is still valid
+function isExtensionValid() {
+  try {
+    // This will throw if context is invalidated
+    return !!(chrome.runtime && chrome.runtime.id);
+  } catch (e) {
+    extensionContextValid = false;
+    return false;
+  }
+}
 
 console.log(
   "Privacy Guard: Content script loaded on",
@@ -17,25 +32,28 @@ console.log(
 );
 
 // Listen for messages from the popup
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === "injectIdentity") {
-    console.log(
-      "Privacy Guard: Injecting identity from popup:",
-      request.identity?.name,
-    );
-    injectIdentityContext(request.identity);
-    sendResponse({ success: true });
-  } else if (request.type === "injectIdentityWithPollution") {
-    console.log(
-      "Privacy Guard: Identity switch with pollution requested:",
-      request.previousIdentity?.name,
-      "→",
-      request.newIdentity?.name,
-    );
-    handleIdentitySwitchWithPollution(request.previousIdentity, request.newIdentity);
-    sendResponse({ success: true });
-  }
-});
+try {
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (!isExtensionValid()) return;
+
+    if (request.type === 'injectIdentity') {
+      console.log("Privacy Guard: Injecting identity from popup:", request.identity?.name);
+      injectIdentityContext(request.identity);
+      sendResponse({ success: true });
+    } else if (request.type === "injectIdentityWithPollution") {
+      console.log(
+        "Privacy Guard: Identity switch with pollution requested:",
+        request.previousIdentity?.name,
+        "→",
+        request.newIdentity?.name,
+      );
+      handleIdentitySwitchWithPollution(request.previousIdentity, request.newIdentity);
+      sendResponse({ success: true });
+    }
+  });
+} catch (e) {
+  console.log("Privacy Guard: Could not add message listener:", e.message);
+}
 
 // Auto-inject selected identity on new chat page
 async function autoInjectIdentityOnPageLoad() {
@@ -60,29 +78,30 @@ function injectIdentityContext(identity) {
   }
 
   const characteristics = identity.characteristics || [];
-  const prompt = identity.prompt || "";
-
-  // Build context message
-  let contextMessage = `You are roleplaying as ${identity.name}.`;
+  const summary = identity.summary || '';
+  
+  // Build context message from characteristics only
+  let contextParts = [];
+  
   if (characteristics.length > 0) {
-    // Extract values from characteristic objects (they have id, name, value)
-    const charTexts = characteristics
-      .map((char) => {
-        if (typeof char === "string") return char;
-        if (char && char.value) return char.value;
-        if (char && char.name) return char.name;
-        return "";
-      })
-      .filter((c) => c && c.trim());
-
+    // Format characteristics as "Name: Value" pairs
+    const charTexts = characteristics.map(char => {
+      if (typeof char === 'object' && char.name && char.value) {
+        return `${char.name}: ${char.value}`;
+      }
+      return '';
+    }).filter(c => c && c.trim());
+    
     if (charTexts.length > 0) {
-      contextMessage += ` Key characteristics: ${charTexts.join(", ")}.`;
+      contextParts.push(`[Context: ${charTexts.join('. ')}]`);
     }
+  } else if (summary) {
+    // Fall back to summary if no characteristics
+    contextParts.push(`[Context: ${summary}]`);
   }
-  if (prompt) {
-    contextMessage += ` ${prompt}`;
-  }
-
+  
+  const contextMessage = contextParts.join(' ');
+  
   // Find the input field
   const input = findInput();
 
@@ -138,16 +157,37 @@ let currentChatUrl = window.location.href; // Track current chat to detect navig
 // Fetch the selected identity from chrome storage
 async function getSelectedIdentity() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(["identities", "selectedId"], (result) => {
-      if (result.selectedId && result.identities) {
-        const identity = result.identities.find(
-          (i) => i.id === result.selectedId,
-        );
-        resolve(identity || null);
-      } else {
+    try {
+      if (!isExtensionValid()) {
         resolve(null);
+        return;
       }
-    });
+      
+      chrome.storage.sync.get(["identities", "selectedId"], (result) => {
+        if (!isExtensionValid()) {
+          resolve(null);
+          return;
+        }
+        
+        if (chrome.runtime.lastError) {
+          console.log("Privacy Guard: Storage error:", chrome.runtime.lastError.message);
+          resolve(null);
+          return;
+        }
+        
+        if (result.selectedId && result.identities) {
+          const identity = result.identities.find(
+            (i) => i.id === result.selectedId,
+          );
+          resolve(identity || null);
+        } else {
+          resolve(null);
+        }
+      });
+    } catch (error) {
+      console.log("Privacy Guard: Error getting identity:", error);
+      resolve(null);
+    }
   });
 }
 
@@ -199,6 +239,11 @@ async function detectPersonalInfoWithAI(
 // Rewrite message to remove sensitive information (via background service worker)
 async function rewriteMessage(originalText, itemsToRemove, identity = null) {
   return new Promise((resolve, reject) => {
+    if (!isExtensionValid()) {
+      reject(new Error("Extension context invalidated"));
+      return;
+    }
+    
     chrome.runtime.sendMessage(
       {
         type: "rewriteMessage",
@@ -207,14 +252,68 @@ async function rewriteMessage(originalText, itemsToRemove, identity = null) {
         identity,
       },
       (response) => {
-        if (response.success) {
+        if (!isExtensionValid()) {
+          reject(new Error("Extension context invalidated"));
+          return;
+        }
+        
+        if (response && response.success) {
           resolve(response.data);
         } else {
-          console.error("Privacy Guard: Rewrite error:", response.error);
-          reject(new Error(response.error));
+          console.error("Privacy Guard: Rewrite error:", response?.error);
+          reject(new Error(response?.error || "Unknown error"));
         }
       },
     );
+  });
+}
+
+// Check if prompt needs context and get augmented version
+async function checkAndAugmentContext(text, identity) {
+  return new Promise((resolve) => {
+    // Timeout after 10 seconds to prevent hanging
+    const timeout = setTimeout(() => {
+      console.log("Privacy Guard: Context check timed out, proceeding without context");
+      resolve({ needsContext: false, augmentedPrompt: text });
+    }, 10000);
+    
+    try {
+      if (!isExtensionValid()) {
+        clearTimeout(timeout);
+        resolve({ needsContext: false, augmentedPrompt: text });
+        return;
+      }
+      
+      chrome.runtime.sendMessage(
+        {
+          type: "checkContextNeeded",
+          prompt: text,
+          identity,
+        },
+        (response) => {
+          clearTimeout(timeout);
+          
+          // Check for runtime errors (extension reloaded, etc.)
+          if (!isExtensionValid() || chrome.runtime.lastError) {
+            console.log("Privacy Guard: Runtime error in context check:", chrome.runtime.lastError?.message);
+            resolve({ needsContext: false, augmentedPrompt: text });
+            return;
+          }
+          
+          if (response && response.success) {
+            console.log("Privacy Guard: Context check complete:", response.data?.needsContext);
+            resolve(response.data);
+          } else {
+            console.log("Privacy Guard: Context check returned no data, proceeding without context");
+            resolve({ needsContext: false, augmentedPrompt: text });
+          }
+        },
+      );
+    } catch (error) {
+      clearTimeout(timeout);
+      console.log("Privacy Guard: Error in checkAndAugmentContext:", error);
+      resolve({ needsContext: false, augmentedPrompt: text });
+    }
   });
 }
 
@@ -400,14 +499,11 @@ function hashString(str) {
 
 // Check if the submit button was clicked
 async function interceptSubmission(textarea, shouldAutoSubmit = false) {
-  // Skip if input monitoring is disabled
-  if (!ENABLE_INPUT_MONITORING) {
-    return {
-      proceed: true,
-      text: textarea.value || textarea.textContent || "",
-    };
+  // If extension context is invalid, just let the message through
+  if (!isExtensionValid()) {
+    return { proceed: true, text: textarea.value || textarea.textContent || "" };
   }
-
+  
   const text =
     textarea.value || textarea.textContent || textarea.innerText || "";
   const textHash = hashString(text);
@@ -420,7 +516,103 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
   // If already approved, allow through
   if (approvedMessages.has(textHash)) {
     console.log("Privacy Guard: Message already approved");
+    // Still need to trigger submit since we prevented the default event
+    if (shouldAutoSubmit) {
+      isProgrammaticSubmit = true;
+      setTimeout(() => {
+        // Find button fresh each time to avoid stale references
+        const sendBtn = document.querySelector('button[aria-label="Send prompt"]') ||
+                        document.querySelector('button.send-button') ||
+                        document.querySelector('button[data-testid="send-button"]');
+        if (sendBtn) {
+          sendBtn.click();
+        } else if (currentForm) {
+          currentForm.requestSubmit();
+        }
+        isProgrammaticSubmit = false;
+      }, 50);
+    }
     return { proceed: true, text };
+  }
+
+  // Check for context augmentation (runs even if input monitoring is disabled)
+  if (ENABLE_CONTEXT_AUGMENTATION && !contextAugmentedMessages.has(textHash)) {
+    const identity = await getSelectedIdentity();
+    
+    if (identity && identity.characteristics && identity.characteristics.length > 0) {
+      console.log("Privacy Guard: Checking if prompt needs context...");
+      
+      const contextResult = await checkAndAugmentContext(text, identity);
+      
+      if (contextResult.needsContext && contextResult.augmentedPrompt !== text) {
+        console.log("Privacy Guard: Adding context to prompt");
+        console.log("Privacy Guard: Reason:", contextResult.reason);
+        console.log("Privacy Guard: Added context:", contextResult.addedContext);
+        
+        // Update textarea with augmented text
+        if (textarea.value !== undefined) {
+          textarea.value = contextResult.augmentedPrompt;
+        } else {
+          textarea.textContent = contextResult.augmentedPrompt;
+          textarea.innerText = contextResult.augmentedPrompt;
+        }
+
+        // Trigger input event to update the app's internal state
+        const inputEvent = new Event("input", { bubbles: true });
+        textarea.dispatchEvent(inputEvent);
+
+        // Mark as augmented so we don't augment again
+        const augmentedHash = hashString(contextResult.augmentedPrompt);
+        contextAugmentedMessages.add(augmentedHash);
+        approvedMessages.add(augmentedHash);
+
+        // Auto-submit the augmented message
+        if (shouldAutoSubmit) {
+          isProgrammaticSubmit = true;
+          setTimeout(() => {
+            // Find button fresh each time
+            const sendBtn = document.querySelector('button[aria-label="Send prompt"]') ||
+                            document.querySelector('button.send-button') ||
+                            document.querySelector('button[data-testid="send-button"]');
+            if (sendBtn) {
+              sendBtn.click();
+            } else if (currentForm) {
+              currentForm.requestSubmit();
+            }
+            isProgrammaticSubmit = false;
+          }, 100);
+        }
+
+        return { proceed: true, text: contextResult.augmentedPrompt };
+      }
+    }
+  }
+
+  // Skip privacy monitoring if input monitoring is disabled
+  if (!ENABLE_INPUT_MONITORING) {
+    // Mark as approved so we don't check again when we click submit
+    approvedMessages.add(textHash);
+    
+    // Auto-submit since we already prevented the default event
+    if (shouldAutoSubmit) {
+      isProgrammaticSubmit = true;
+      setTimeout(() => {
+        // Find button fresh each time
+        const sendBtn = document.querySelector('button[aria-label="Send prompt"]') ||
+                        document.querySelector('button.send-button') ||
+                        document.querySelector('button[data-testid="send-button"]');
+        if (sendBtn) {
+          sendBtn.click();
+        } else if (currentForm) {
+          currentForm.requestSubmit();
+        }
+        isProgrammaticSubmit = false;
+      }, 50);
+    }
+    return {
+      proceed: true,
+      text: textarea.value || textarea.textContent || "",
+    };
   }
 
   // Gather context: selected identity and chat history
@@ -1162,7 +1354,14 @@ function monitorChatGPTInput() {
 
     // Method 3: Monitor the send button
     const findSendButton = () => {
-      // Gemini uses .send-button class - try this first
+      // ChatGPT: Look for button with exact aria-label="Send prompt" first
+      const chatGptSendBtn = document.querySelector('button[aria-label="Send prompt"]');
+      if (chatGptSendBtn && chatGptSendBtn.offsetParent !== null) {
+        console.log("Privacy Guard: Found ChatGPT send button with aria-label='Send prompt'");
+        return chatGptSendBtn;
+      }
+      
+      // Gemini uses .send-button class
       const geminiSendBtn = document.querySelector("button.send-button");
       if (geminiSendBtn && geminiSendBtn.offsetParent !== null) {
         console.log(
@@ -1171,41 +1370,13 @@ function monitorChatGPTInput() {
         return geminiSendBtn;
       }
 
-      const buttons = document.querySelectorAll("button");
-      for (const btn of buttons) {
-        const hasDataTestId = btn.getAttribute("data-testid") === "send-button";
-        const hasSvg = btn.querySelector("svg");
-        const hasMatIcon = btn.querySelector("mat-icon");
-        const ariaLabel = btn.getAttribute("aria-label") || "";
-        const title = btn.getAttribute("title") || "";
-
-        // Check various send button indicators
-        const isAriaLabel = ariaLabel.toLowerCase().includes("send");
-        const isTitle = title.toLowerCase().includes("send");
-        const isVisible = btn.offsetParent !== null; // Not hidden
-        const hasIcon = (hasSvg || hasMatIcon) && btn.textContent.trim() === "";
-
-        // Gemini: Look for button with icon near textarea
-        const nearTextarea = input && input.parentElement?.contains(btn);
-
-        if (
-          hasDataTestId ||
-          (hasIcon && isVisible) ||
-          isAriaLabel ||
-          isTitle ||
-          (nearTextarea && isVisible && (hasSvg || hasMatIcon))
-        ) {
-          console.log(
-            "Privacy Guard: Send button candidate found with aria-label:",
-            ariaLabel,
-            "title:",
-            title,
-            "hasIcon:",
-            hasIcon,
-          );
-          return btn;
-        }
+      // Fallback: Look for data-testid="send-button"
+      const testIdBtn = document.querySelector('button[data-testid="send-button"]');
+      if (testIdBtn && testIdBtn.offsetParent !== null) {
+        console.log("Privacy Guard: Found send button with data-testid='send-button'");
+        return testIdBtn;
       }
+
       return null;
     };
 
@@ -1216,6 +1387,12 @@ function monitorChatGPTInput() {
       sendButton.addEventListener(
         "click",
         async (e) => {
+          // If this is a programmatic submit, let it through
+          if (isProgrammaticSubmit) {
+            console.log("Privacy Guard: Programmatic submit, allowing through");
+            return;
+          }
+          
           console.log("Privacy Guard: Send button clicked");
 
           // Check if message is already approved (from rewrite)
@@ -1240,13 +1417,6 @@ function monitorChatGPTInput() {
             console.log("Privacy Guard: User cancelled, not submitting");
             return false;
           }
-
-          console.log("Privacy Guard: User approved, now actually submitting");
-          // The message text may have been rewritten, but we still need to click the button
-          // Actually click the send button for real this time
-          setTimeout(() => {
-            sendButton.click();
-          }, 100);
         },
         true,
       );

@@ -48,6 +48,10 @@ function Options() {
   };
 
   const handleSelectIdentity = (id: string) => {
+    // Don't do anything if selecting the same identity
+    if (id === selectedId) return;
+    
+    // The IdentityEditor component handles auto-saving via useEffect when identity changes
     setSelectedId(id);
     chrome.storage.sync.set({ selectedId: id });
   };
