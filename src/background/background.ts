@@ -113,6 +113,24 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         });
       });
     return true;
+  } else if (request.type === "generateSwitchPollutionMessage") {
+    console.log("Background: Generating switch pollution message");
+    generateSwitchPollutionMessage(
+      request.previousIdentity,
+      request.newIdentity
+    )
+      .then((result) => {
+        console.log("Background: Switch pollution message generation complete");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Switch pollution message error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      });
+    return true;
   }
 });
 
@@ -482,6 +500,137 @@ Example format:
     return result;
   } catch (error) {
     console.error("Background: Characteristic extraction error:", error);
+    throw error;
+  }
+}
+
+// Analyze characteristics between two identities for pollution generation
+// Returns overlaps (characteristics in both with different values) and denialsOnly (I1 characteristics with no I2 match)
+function analyzeCharacteristicsForPollution(
+  prevIdentity: any,
+  newIdentity: any,
+): {
+  overlaps: { name: string; oldValue: string; newValue: string }[];
+  denialsOnly: { name: string; value: string }[];
+} {
+  const prevChars = prevIdentity?.characteristics || [];
+  const newChars = newIdentity?.characteristics || [];
+
+  // Create a map of new identity characteristics by normalized name
+  const newCharsMap = new Map<string, string>();
+  for (const char of newChars) {
+    const normalizedName = char.name.toLowerCase().trim();
+    newCharsMap.set(normalizedName, char.value);
+  }
+
+  const overlaps: { name: string; oldValue: string; newValue: string }[] = [];
+  const denialsOnly: { name: string; value: string }[] = [];
+
+  for (const prevChar of prevChars) {
+    const normalizedName = prevChar.name.toLowerCase().trim();
+    const newValue = newCharsMap.get(normalizedName);
+
+    if (newValue !== undefined) {
+      // Both identities have this characteristic - it's an overlap
+      // Only add if values are different (otherwise no contradiction needed)
+      if (newValue !== prevChar.value) {
+        overlaps.push({
+          name: prevChar.name,
+          oldValue: prevChar.value,
+          newValue: newValue,
+        });
+      }
+    } else {
+      // Only I1 has this characteristic - denial only
+      denialsOnly.push({
+        name: prevChar.name,
+        value: prevChar.value,
+      });
+    }
+  }
+
+  return { overlaps, denialsOnly };
+}
+
+// Generate pollution message for identity switch
+async function generateSwitchPollutionMessage(
+  prevIdentity: any,
+  newIdentity: any,
+): Promise<{
+  hasPollution: boolean;
+  message: string;
+  overlaps: { name: string; oldValue: string; newValue: string }[];
+  denialsOnly: { name: string; value: string }[];
+}> {
+  const { overlaps, denialsOnly } = analyzeCharacteristicsForPollution(
+    prevIdentity,
+    newIdentity,
+  );
+
+  console.log("Background: Analyzed characteristics for pollution");
+  console.log("Overlaps:", overlaps);
+  console.log("Denials only:", denialsOnly);
+
+  if (overlaps.length === 0 && denialsOnly.length === 0) {
+    return { hasPollution: false, message: "", overlaps, denialsOnly };
+  }
+
+  // Build input items for the AI
+  const inputItems = [
+    // For overlaps: use I2 value to contradict I1
+    ...overlaps.map((o) => ({
+      knownInfo: `${o.name}: ${o.oldValue}`,
+      newValue: o.newValue,
+      strategy: "pollution",
+    })),
+    // For denials only: just negate I1 with no replacement
+    ...denialsOnly.map((d) => ({
+      knownInfo: `${d.name}: ${d.value}`,
+      strategy: "denial",
+    })),
+  ];
+
+  const prompt = `Role: You are a Privacy Obfuscation Engine. Your goal is to generate a standalone, self-contained message that clarifies personal information. This message will be sent to an AI assistant that has NO prior context - treat it as a fresh conversation.
+
+Input: A list of objects containing {knownInfo, strategy, newValue?}:
+- knownInfo: The sensitive information that needs to be contradicted/corrected
+- strategy: Either "pollution" (replace with new value) or "denial" (just negate without replacement)
+- newValue: (only for pollution) The new value to assert instead
+
+Task: Generate a SELF-CONTAINED message that explicitly states all the corrections. Since the recipient has NO context, you must:
+1. For "pollution" items: Explicitly state the NEW correct value AND deny the old value
+   Example: "I'm from Vancouver, not Toronto."
+2. For "denial" items: Explicitly state what is NOT true
+   Example: "I'm not really into reading."
+
+CRITICAL Guidelines:
+- This message will be sent to a BLANK conversation with NO prior context
+- You MUST explicitly mention ALL items - do not skip anything assuming it was already said
+- Start with something like "I just wanted to clarify a few things about myself:" or "Quick note about me:"
+- Combine all items into one cohesive, conversational paragraph
+- Be clear and direct - every piece of information must be explicitly stated
+- Do NOT mention AI, strategies, or context switching
+- Keep it natural and casual
+
+Output: A single, self-contained message that can be understood without any prior context.`;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: prompt },
+        { role: "user", content: JSON.stringify(inputItems) },
+      ],
+      temperature: 0.3,
+      max_tokens: 500,
+    });
+
+    const message = completion.choices[0].message.content?.trim() || "";
+    console.log("Background: Generated switch pollution message:", message);
+
+    return { hasPollution: true, message, overlaps, denialsOnly };
+  } catch (error) {
+    console.error("Background: Error generating switch pollution message:", error);
     throw error;
   }
 }

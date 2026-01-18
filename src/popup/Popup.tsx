@@ -41,7 +41,7 @@ function Popup() {
   const handleSwitch = async () => {
     console.log('Switch button clicked!');
     console.log('selectedDropdownId:', selectedDropdownId);
-    
+
     if (!selectedDropdownId) {
       alert('Please select an identity first');
       return;
@@ -49,26 +49,29 @@ function Popup() {
 
     const newIdentity = identities.find(i => i.id === selectedDropdownId);
     console.log('Found identity:', newIdentity);
-    
+
     if (!newIdentity) return;
+
+    // Capture the previous identity before updating state
+    const previousIdentity = currentIdentity;
 
     setCurrentIdentity(newIdentity);
     await setSelectedIdentity(selectedDropdownId);
 
-    // Inject the identity into the active tab
+    // Inject the identity into the active tab with pollution support
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       console.log('Tabs query result:', tabs);
-      
+
       if (!tabs[0]) {
         console.log('No active tab');
         alert('No active tab found');
         return;
       }
-      
+
       const tabId = tabs[0].id;
       const tabUrl = tabs[0].url;
       console.log('Active tab URL:', tabUrl);
-      
+
       if (!tabId) {
         console.log('No tab ID');
         alert('No tab ID found');
@@ -76,12 +79,14 @@ function Popup() {
       }
 
       console.log('Sending message to tab:', tabId, 'URL:', tabUrl);
-      
+      console.log('Previous identity:', previousIdentity?.name, '→ New identity:', newIdentity.name);
+
       chrome.tabs.sendMessage(
         tabId,
         {
-          type: 'injectIdentity',
-          identity: newIdentity
+          type: 'injectIdentityWithPollution',
+          previousIdentity,
+          newIdentity
         },
         (response) => {
           if (chrome.runtime.lastError) {

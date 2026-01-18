@@ -466,3 +466,106 @@
 .pollution-message-textarea::placeholder {
   color: #a0a0a8;
 }
+
+/* ========================================
+   Identity Switch Pollution Modal
+   ======================================== */
+
+/* Characteristics Comparison Section */
+.characteristics-comparison {
+  margin-bottom: 16px;
+}
+
+.comparison-section {
+  margin-bottom: 16px;
+}
+
+.comparison-section h4 {
+  color: #ececec;
+  font-size: 14px;
+  margin: 0 0 10px 0;
+  font-weight: 500;
+}
+
+.comparison-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comparison-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #3e3e3e;
+  border-radius: 8px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.comparison-item.overlap-item {
+  border-left: 3px solid #19c37d;
+}
+
+.comparison-item.denial-item {
+  border-left: 3px solid #f5d06c;
+}
+
+.char-name {
+  color: #a0a0a8;
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.char-old {
+  color: #ff6b6b;
+  background: #2a2a2a;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-decoration: line-through;
+}
+
+.char-arrow {
+  color: #565869;
+  font-weight: bold;
+}
+
+.char-new {
+  color: #19c37d;
+  background: #1a3a2a;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.char-denied {
+  color: #f5d06c;
+  background: #3e3020;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-style: italic;
+}
+
+/* Pollution Message Section in Switch Modal */
+.pollution-message-section {
+  margin-top: 16px;
+}
+
+.pollution-message-section label {
+  display: block;
+  color: #a0a0a8;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+/* No Pollution State */
+.no-pollution-state {
+  text-align: center;
+  padding: 20px;
+  color: #a0a0a8;
+}
+
+.no-pollution-state p {
+  margin: 0;
+}

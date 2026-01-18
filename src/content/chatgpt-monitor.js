@@ -25,6 +25,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     );
     injectIdentityContext(request.identity);
     sendResponse({ success: true });
+  } else if (request.type === "injectIdentityWithPollution") {
+    console.log(
+      "Privacy Guard: Identity switch with pollution requested:",
+      request.previousIdentity?.name,
+      "→",
+      request.newIdentity?.name,
+    );
+    handleIdentitySwitchWithPollution(request.previousIdentity, request.newIdentity);
+    sendResponse({ success: true });
   }
 });
 
@@ -1259,6 +1268,206 @@ function monitorChatGPTInput() {
     childList: true,
     subtree: true,
   });
+}
+
+// ==========================================
+// IDENTITY SWITCH WITH POLLUTION
+// ==========================================
+
+// Handle identity switch with pollution message generation
+async function handleIdentitySwitchWithPollution(previousIdentity, newIdentity) {
+  // If no previous identity, nothing to pollute - just log and return
+  if (!previousIdentity) {
+    console.log("Privacy Guard: No previous identity, nothing to pollute");
+    return;
+  }
+
+  // Show the modal immediately in loading state
+  showSwitchPollutionModal(previousIdentity, newIdentity);
+}
+
+// Show the switch pollution modal
+function showSwitchPollutionModal(previousIdentity, newIdentity) {
+  // Remove existing modal if present
+  const existingModal = document.getElementById("switch-pollution-modal");
+  if (existingModal) {
+    existingModal.remove();
+  }
+
+  const modal = document.createElement("div");
+  modal.id = "switch-pollution-modal";
+
+  const prevName = previousIdentity?.name || "Unknown";
+  const newName = newIdentity?.name || "Unknown";
+
+  modal.innerHTML = `
+    <div class="privacy-modal-overlay">
+      <div class="privacy-modal-content">
+        <div class="privacy-modal-header">
+          <h2>🔄 Switching Identity: ${prevName} → ${newName}</h2>
+        </div>
+        <div class="privacy-modal-body">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Analyzing characteristics and generating pollution message...</p>
+          </div>
+          <div class="results-state" style="display: none;">
+            <div class="characteristics-comparison"></div>
+            <div class="pollution-message-section">
+              <label for="switch-pollution-text">Edit the pollution message:</label>
+              <textarea id="switch-pollution-text" class="pollution-message-textarea" placeholder="Pollution message will appear here..."></textarea>
+            </div>
+          </div>
+          <div class="no-pollution-state" style="display: none;">
+            <p>No overlapping or conflicting characteristics found between these identities. No pollution message is needed.</p>
+          </div>
+        </div>
+        <div class="privacy-modal-footer">
+          <button id="switch-cancel-btn" class="privacy-btn privacy-btn-cancel">Cancel</button>
+          <button id="switch-copy-btn" class="privacy-btn privacy-btn-proceed-original" style="display: none;">Copy</button>
+          <button id="switch-send-btn" class="privacy-btn privacy-btn-rewrite" style="display: none;">Send</button>
+          <button id="switch-inject-only-btn" class="privacy-btn privacy-btn-rewrite" style="display: none;">Close</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  console.log("Privacy Guard: Switch pollution modal shown");
+
+  // Set up cancel button (works in loading state)
+  modal.querySelector("#switch-cancel-btn").addEventListener("click", () => {
+    console.log("Privacy Guard: User cancelled identity switch");
+    modal.remove();
+  });
+
+  // Request pollution message from background
+  chrome.runtime.sendMessage(
+    {
+      type: "generateSwitchPollutionMessage",
+      previousIdentity,
+      newIdentity,
+    },
+    (response) => {
+      if (!response || !response.success) {
+        console.error("Privacy Guard: Failed to generate pollution message:", response?.error);
+        // Show error state
+        modal.querySelector(".loading-state").innerHTML = `
+          <p style="color: #ff6b6b;">Failed to generate pollution message. Please try again.</p>
+        `;
+        return;
+      }
+
+      const { hasPollution, message, overlaps, denialsOnly } = response.data;
+
+      // Hide loading state
+      modal.querySelector(".loading-state").style.display = "none";
+
+      if (!hasPollution) {
+        // No overlaps or denials - show no-pollution state and just close
+        modal.querySelector(".no-pollution-state").style.display = "block";
+        modal.querySelector("#switch-inject-only-btn").style.display = "inline-block";
+        modal.querySelector("#switch-inject-only-btn").textContent = "Close";
+
+        // Set up close button - just closes modal, no identity injection
+        modal.querySelector("#switch-inject-only-btn").addEventListener("click", () => {
+          console.log("Privacy Guard: No pollution needed, closing modal");
+          modal.remove();
+        });
+        return;
+      }
+
+      // Show results state
+      modal.querySelector(".results-state").style.display = "block";
+      modal.querySelector("#switch-copy-btn").style.display = "inline-block";
+      modal.querySelector("#switch-send-btn").style.display = "inline-block";
+
+      // Build characteristics comparison HTML
+      let comparisonHtml = "";
+
+      if (overlaps.length > 0) {
+        comparisonHtml += `
+          <div class="comparison-section">
+            <h4>Overlapping Characteristics (will be contradicted):</h4>
+            <div class="comparison-list">
+              ${overlaps.map(o => `
+                <div class="comparison-item overlap-item">
+                  <span class="char-name">${o.name}:</span>
+                  <span class="char-old">${o.oldValue}</span>
+                  <span class="char-arrow">→</span>
+                  <span class="char-new">${o.newValue}</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      if (denialsOnly.length > 0) {
+        comparisonHtml += `
+          <div class="comparison-section">
+            <h4>Characteristics to Deny (no replacement in new identity):</h4>
+            <div class="comparison-list">
+              ${denialsOnly.map(d => `
+                <div class="comparison-item denial-item">
+                  <span class="char-name">${d.name}:</span>
+                  <span class="char-old">${d.value}</span>
+                  <span class="char-arrow">→</span>
+                  <span class="char-denied">(denied)</span>
+                </div>
+              `).join("")}
+            </div>
+          </div>
+        `;
+      }
+
+      modal.querySelector(".characteristics-comparison").innerHTML = comparisonHtml;
+
+      // Set the generated message in the textarea
+      const textarea = modal.querySelector("#switch-pollution-text");
+      textarea.value = message;
+
+      // Set up copy button
+      modal.querySelector("#switch-copy-btn").addEventListener("click", () => {
+        navigator.clipboard.writeText(textarea.value).then(() => {
+          const btn = modal.querySelector("#switch-copy-btn");
+          btn.textContent = "Copied!";
+          setTimeout(() => {
+            btn.textContent = "Copy";
+          }, 2000);
+        });
+      });
+
+      // Set up send button - just sends the message, no identity injection
+      modal.querySelector("#switch-send-btn").addEventListener("click", async () => {
+        const finalMessage = textarea.value.trim();
+        if (!finalMessage) {
+          alert("Please enter a pollution message or cancel.");
+          return;
+        }
+
+        console.log("Privacy Guard: Sending pollution message");
+
+        // Disable buttons during sending
+        modal.querySelector("#switch-send-btn").disabled = true;
+        modal.querySelector("#switch-send-btn").textContent = "Sending...";
+
+        // Send the pollution message
+        const sendResult = await sendMessageToChatApp(finalMessage);
+
+        if (sendResult.success) {
+          console.log("Privacy Guard: Pollution message sent successfully");
+          modal.remove();
+        } else {
+          console.error("Privacy Guard: Failed to send pollution message:", sendResult.error);
+          modal.querySelector("#switch-send-btn").disabled = false;
+          modal.querySelector("#switch-send-btn").textContent = "Send";
+          alert("Failed to send message. Please try again.");
+        }
+      });
+    }
+  );
 }
 
 // Initialize when DOM is ready
