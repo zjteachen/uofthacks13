@@ -1048,9 +1048,16 @@ async function generatePollutionMessage(toDeny, toPollute) {
 }
 
 // Update fake identity characteristics from pollution data
-async function updateFakeIdentityFromPollution(identityId, toPollute) {
+// fakeValues: Array of {category, originalValue, fakeValue} from the LLM
+async function updateFakeIdentityFromPollution(identityId, fakeValues) {
   try {
     console.log("Privacy Guard: Updating fake identity from pollution data");
+    console.log("Privacy Guard: Fake values to save:", fakeValues);
+
+    if (!fakeValues || fakeValues.length === 0) {
+      console.log("Privacy Guard: No fake values to save");
+      return;
+    }
 
     // Get current identities
     const result = await chrome.storage.sync.get(["identities"]);
@@ -1071,20 +1078,18 @@ async function updateFakeIdentityFromPollution(identityId, toPollute) {
       existingFakes.map((c) => [c.name.toLowerCase(), c]),
     );
 
-    // Extract characteristics from polluted information
-    toPollute.forEach((violation, idx) => {
-      const charName = violation.category || "Info";
-      const charValue = violation.knownInfo || "";
+    // Add the new fake values (these are the FAKE replacements, not the original data)
+    fakeValues.forEach((fv, idx) => {
+      const charName = fv.category || "Info";
+      const charValue = fv.fakeValue || ""; // Use the FAKE value, not the original
 
       // Add or update fake characteristic
       const key = charName.toLowerCase();
-      if (!fakeMap.has(key)) {
-        fakeMap.set(key, {
-          id: `fake-pollute-${Date.now()}-${idx}`,
-          name: charName.charAt(0).toUpperCase() + charName.slice(1),
-          value: charValue,
-        });
-      }
+      fakeMap.set(key, {
+        id: `fake-pollute-${Date.now()}-${idx}`,
+        name: charName.charAt(0).toUpperCase() + charName.slice(1),
+        value: charValue,
+      });
     });
 
     // Update identity with new fake characteristics
@@ -1093,7 +1098,8 @@ async function updateFakeIdentityFromPollution(identityId, toPollute) {
 
     // Save back to storage
     await chrome.storage.sync.set({ identities });
-    console.log("Privacy Guard: Fake identity updated successfully");
+    console.log("Privacy Guard: Fake identity updated successfully with values:",
+      fakeValues.map(fv => `${fv.category}: ${fv.fakeValue}`).join(", "));
   } catch (error) {
     console.error("Privacy Guard: Error updating fake identity:", error);
   }
@@ -1136,22 +1142,24 @@ async function analyzeAssistantResponse(responseText) {
       }
 
       try {
-        // Generate the pollution message
+        // Generate the pollution message (returns {message, fakeValues})
         console.log("Privacy Guard: Generating pollution message...");
-        const generatedMessage = await generatePollutionMessage(
+        const pollutionResult = await generatePollutionMessage(
           toDeny,
           toPollute,
         );
-        console.log("Privacy Guard: Generated message:", generatedMessage);
+        console.log("Privacy Guard: Generated result:", pollutionResult);
+
+        const { message: generatedMessage, fakeValues } = pollutionResult;
 
         // Show confirmation modal
         const confirmResult =
           await showPollutionConfirmationModal(generatedMessage);
 
         if (confirmResult.action === "send") {
-          // Update fake identity with polluted information
-          if (toPollute.length > 0 && identity) {
-            await updateFakeIdentityFromPollution(identity.id, toPollute);
+          // Update fake identity with the FAKE values (not the original data)
+          if (fakeValues && fakeValues.length > 0 && identity) {
+            await updateFakeIdentityFromPollution(identity.id, fakeValues);
           }
 
           // Send the message to the chat

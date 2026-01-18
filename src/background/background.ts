@@ -598,11 +598,16 @@ async function addNoiseToContext(
     console.log("Denials", denials);
     console.log("Pollutives", pollutives);
 
-    // Build the input array with knownInfo and strategy
+    // Build the input array with knownInfo, category, and strategy
     const inputItems = [
-      ...denials.map((d) => ({ knownInfo: d.knownInfo, strategy: "denial" })),
+      ...denials.map((d) => ({
+        knownInfo: d.knownInfo,
+        category: d.category || "Unknown",
+        strategy: "denial",
+      })),
       ...pollutives.map((p) => ({
         knownInfo: p.knownInfo,
+        category: p.category || "Unknown",
         strategy: "pollution",
       })),
     ];
@@ -612,15 +617,32 @@ async function addNoiseToContext(
     const prompt = `
 Role: You are a Privacy Obfuscation Engine. Your goal is to generate a natural-sounding message to send to a third-party AI to "clean" or "pollute" the current conversation context based on specific privacy triggers.
 
-Input: A list of objects containing {knownInfo, strategy}, where knownInfo is the sensitive information that the third-party is aware of to be scrubbed/denied, and the strategy is one of "denial", "pollution":
+Input: A list of objects containing {knownInfo, category, strategy}, where:
+- knownInfo: the sensitive information that the third-party is aware of
+- category: the type of information (e.g., "Name", "Location", "Age")
+- strategy: one of "denial" or "pollution"
 
-    denial: Firmly state that knownInfo is incorrect or irrelevant and should be disregarded.
+Strategies:
+- denial: Firmly state that knownInfo is incorrect or irrelevant and should be disregarded.
+- pollution: Contradict knownInfo by asserting a FALSE, MADE-UP alternative fact to create "noise" in the user profile.
 
-    pollution: Contradict knownInfo by asserting a false preference or alternative fact to create "noise" in the user profile and replace the knownInfo in the third-party LLM's context.
+Task:
+1. For each "pollution" item, generate a realistic but FAKE replacement value
+2. Combine everything into a single, cohesive paragraph
+3. The tone should be polite but firm, as if the user is correcting a misunderstanding
 
-Task: Combine the results from all provided objects into a single, cohesive paragraph. The tone should be polite but firm, as if the user is correcting a misunderstanding or clarifying their current needs. Do not mention that you are an AI or that this is a "strategy."
+Output JSON format:
+{
+  "message": "The natural-sounding message to send to the AI",
+  "fakeValues": [
+    {"category": "Name", "originalValue": "John", "fakeValue": "Michael"},
+    {"category": "Location", "originalValue": "New York", "fakeValue": "Chicago"}
+  ]
+}
 
-Output: (A single message ready to be sent to the host LLM).`;
+The fakeValues array should ONLY contain entries for "pollution" strategy items, with the fake value you used in the message.
+Return ONLY the JSON object, no other text.`;
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -630,14 +652,28 @@ Output: (A single message ready to be sent to the host LLM).`;
           content: JSON.stringify(inputItems),
         },
       ],
-      temperature: 0.2,
+      temperature: 0.4,
       max_tokens: 1500,
     });
 
-    const content = completion.choices[0].message.content?.trim() || "[]";
-    console.log("Background: Noise generation response received");
+    const content = completion.choices[0].message.content?.trim() || "{}";
+    console.log("Background: Noise generation response received:", content);
 
-    return content;
+    // Parse the JSON response
+    try {
+      const parsed = JSON.parse(content);
+      return {
+        message: parsed.message || content,
+        fakeValues: parsed.fakeValues || [],
+      };
+    } catch {
+      // If parsing fails, return the content as the message with no fake values
+      console.warn("Background: Could not parse noise response as JSON");
+      return {
+        message: content,
+        fakeValues: [],
+      };
+    }
   } catch (error) {
     console.error("Background: Noise generation error:", error);
     throw error;
