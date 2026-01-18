@@ -14,6 +14,7 @@ function Popup() {
 
   const loadIdentities = async () => {
     const storage = await getIdentitiesStorage();
+    console.log('Loaded storage:', storage);
 
     // Load profile pictures from local storage (matching Options.tsx pattern)
     const identitiesWithImages = await Promise.all(
@@ -23,6 +24,7 @@ function Popup() {
       })
     );
 
+    console.log('Loaded identities:', identitiesWithImages);
     setIdentities(identitiesWithImages);
 
     if (storage.selectedId) {
@@ -37,11 +39,61 @@ function Popup() {
   };
 
   const handleSwitch = async () => {
-    if (!selectedDropdownId) return;
+    console.log('Switch button clicked!');
+    console.log('selectedDropdownId:', selectedDropdownId);
+    
+    if (!selectedDropdownId) {
+      alert('Please select an identity first');
+      return;
+    }
 
-    await setSelectedIdentity(selectedDropdownId);
     const newIdentity = identities.find(i => i.id === selectedDropdownId);
-    setCurrentIdentity(newIdentity || null);
+    console.log('Found identity:', newIdentity);
+    
+    if (!newIdentity) return;
+
+    setCurrentIdentity(newIdentity);
+    await setSelectedIdentity(selectedDropdownId);
+
+    // Inject the identity into the active tab
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      console.log('Tabs query result:', tabs);
+      
+      if (!tabs[0]) {
+        console.log('No active tab');
+        alert('No active tab found');
+        return;
+      }
+      
+      const tabId = tabs[0].id;
+      const tabUrl = tabs[0].url;
+      console.log('Active tab URL:', tabUrl);
+      
+      if (!tabId) {
+        console.log('No tab ID');
+        alert('No tab ID found');
+        return;
+      }
+
+      console.log('Sending message to tab:', tabId, 'URL:', tabUrl);
+      
+      chrome.tabs.sendMessage(
+        tabId,
+        {
+          type: 'injectIdentity',
+          identity: newIdentity
+        },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Error sending message:', chrome.runtime.lastError);
+            console.error('This usually means the content script is not loaded on this page.');
+            console.error('Make sure you\'re on ChatGPT, Gemini, or Claude.');
+          } else {
+            console.log('Message sent successfully, response:', response);
+          }
+        }
+      );
+    });
   };
 
   const handleOpenOptions = () => {
