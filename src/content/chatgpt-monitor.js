@@ -1314,6 +1314,21 @@ function scheduleProcessMessage(messageElement) {
   }, 300);
 }
 
+// Track current chat URL for detecting chat switches
+let currentChatUrl = window.location.href;
+
+// Check for chat switch and reset state if needed
+function checkForChatSwitch() {
+  const newUrl = window.location.href;
+  if (newUrl !== currentChatUrl) {
+    console.log("Privacy Guard: Chat switched, resetting approved messages");
+    currentChatUrl = newUrl;
+    approvedMessages.clear();
+    contextAugmentedMessages.clear();
+    pendingMessages.clear();
+  }
+}
+
 // Set up monitoring for assistant responses
 function setupResponseMonitoring() {
   if (!ENABLE_RESPONSE_MONITORING) {
@@ -1337,6 +1352,8 @@ function setupResponseMonitoring() {
   console.log("Privacy Guard: Setting up response monitoring...");
 
   responseObserver = new MutationObserver((mutationsList) => {
+    // Check for chat switch on every mutation
+    checkForChatSwitch();
     for (const mutation of mutationsList) {
       // Handle new nodes or text changes (page load, chat switch, new messages)
       if (mutation.type === "childList" || mutation.type === "characterData") {
