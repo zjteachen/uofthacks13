@@ -38,6 +38,7 @@ function Options() {
       prompt: '',
       summary: '',
       characteristics: [],
+      fakeCharacteristics: [],
       createdAt: Date.now()
     };
 
