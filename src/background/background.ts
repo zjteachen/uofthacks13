@@ -28,7 +28,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true; // Keep channel open for async response
   } else if (request.type === "rewriteMessage") {
     console.log("Background: Rewriting message");
-    rewriteMessage(request.text, request.itemsToRemove, request.identity)
+    rewriteMessage(request.text, request.itemsToRemove)
       .then((result) => {
         console.log("Background: Rewrite complete, sending response");
         sendResponse({ success: true, data: result });
@@ -65,28 +65,53 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     console.log("toPollute:", request.toPollute);
     addNoiseToContext(request.toDeny, request.toPollute)
       .then((result) => {
-        console.log("Resulting adverserial message:", result);
+        console.log("Resulting adversarial message:", result);
         sendResponse({ success: true, data: result });
       })
       .catch((error) => {
-        console.error("Background: Violation detection error:", error);
+        console.error("Background: Noise generation error:", error);
         sendResponse({
           success: false,
           error: error instanceof Error ? error.message : "Unknown error",
         });
       });
-    //     generateCombinedPollutionMessage(request.toDeny, request.toPollute)
-    //       .then((result) => {
-    //         console.log("Background: Pollution message generated");
-    //         sendResponse({ success: true, data: result });
-    //       })
-    //       .catch((error) => {
-    //         console.error("Background: Pollution message generation error:", error);
-    //         sendResponse({
-    //           success: false,
-    //           error: error instanceof Error ? error.message : "Unknown error",
-    //         });
-    //       });
+    return true;
+  } else if (request.type === "extractCharacteristics") {
+    console.log("Background: Extracting characteristics from prompt");
+    extractCharacteristicsFromPrompt(
+      request.prompt,
+      request.identityName,
+      request.existingCharacteristics || []
+    )
+      .then((result) => {
+        console.log("Background: Extraction complete, sending response");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Extraction error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      });
+    return true;
+  } else if (request.type === "generateSummary") {
+    console.log("Background: Generating summary from characteristics");
+    generateSummaryFromCharacteristics(
+      request.characteristics,
+      request.identityName
+    )
+      .then((result) => {
+        console.log("Background: Summary generation complete, sending response");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Summary generation error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      });
     return true;
   }
 });
@@ -277,43 +302,28 @@ Return ONLY the JSON array, nothing else.`;
 async function rewriteMessage(
   originalText: string,
   itemsToRemove: any[],
-  identity: any = null,
 ) {
   try {
-    let identityContext = "";
-    if (
-      identity &&
-      identity.characteristics &&
-      identity.characteristics.length > 0
-    ) {
-      const allowedInfo = identity.characteristics
-        .map((c: any) => `${c.name}: ${c.value}`)
-        .join(", ");
-      identityContext = `\n\nIMPORTANT: The user has a privacy profile allowing these details: ${allowedInfo}. When rewriting, you may keep information that matches these allowed characteristics, but remove or generalize the flagged items that go beyond what's allowed.`;
-    }
-
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "system",
-          content: `You are a privacy protection assistant. Rewrite the user's message to remove or anonymize the specified sensitive information while maintaining the core meaning and intent of the message.
+          content: `You are a privacy protection assistant. Rewrite the user's message to remove or anonymize ONLY the specific sensitive items listed below. Do NOT remove or modify any other information.
 
 CRITICAL RULES:
-1. NEVER use placeholders like [name], [location], [redacted], etc.
-2. Either omit the sensitive information entirely or replace it with natural, generic terms
-3. Make the message flow naturally without obvious gaps
-4. Replace specific locations with general terms (e.g., "from India" → "from South Asia" or just remove it)
-5. Remove or generalize personal identifiers completely
-6. Keep the message natural and conversational
-7. Maintain the original tone and style
-8. If removing something makes the sentence awkward, rephrase the entire sentence naturally
+1. ONLY rewrite/remove the EXACT items listed in "Remove these sensitive items" section
+2. Keep ALL other parts of the message EXACTLY as they are
+3. If an item is NOT in the list, do NOT modify it - even if it seems sensitive
+4. NEVER use placeholders like [name], [location], [redacted], etc.
+5. Either omit the sensitive information entirely or replace it with natural, generic terms
+6. Make the message flow naturally without obvious gaps
+7. Keep the message natural and conversational
+8. Maintain the original tone and style
+9. If removing something makes the sentence awkward, rephrase only that sentence naturally
 
-Examples:
-- "Hi, I'm John from Toronto" → "Hi, I'm someone from Canada" or "Hi there"
-- "My name is Sarah" → "I'm a person" or just start the message differently
-- "I live in the land of spices" → "I live in a warm country" or just remove
-${identityContext}
+BE STRICT: If the user selected 2 items to remove, rewrite ONLY those 2 items. Leave everything else untouched.
+
 Return ONLY the rewritten message text, nothing else.`,
         },
         {
@@ -389,11 +399,140 @@ Output: (A single message ready to be sent to the host LLM).`;
     });
 
     const content = completion.choices[0].message.content?.trim() || "[]";
-    console.log("Background: Violation detection response received");
+    console.log("Background: Noise generation response received");
 
     return content;
   } catch (error) {
-    console.error("Background: Violation detection error:", error);
+    console.error("Background: Noise generation error:", error);
+    throw error;
+  }
+}
+
+async function extractCharacteristicsFromPrompt(
+  prompt: string,
+  identityName: string,
+  existingCharacteristics: any[] = [],
+) {
+  try {
+    console.log("Background: Extracting characteristics from prompt");
+
+    const existingCharsText =
+      existingCharacteristics.length > 0
+        ? `\n\nEXISTING CHARACTERISTICS (already extracted):\n${existingCharacteristics.map((c) => `- ${c.name}: ${c.value}`).join("\n")}`
+        : "";
+
+    const systemPrompt = `You are a privacy assistant that extracts key characteristics from identity descriptions.
+
+Your task: Analyze the provided identity description and extract structured characteristics that define what information this person is comfortable sharing.
+
+Return a JSON object with one field:
+- "characteristics": An array of ONLY NEW key-value pairs from the current prompt (do not repeat existing characteristics)
+
+Each characteristic should have:
+- "name": The attribute name (e.g., "Name", "Age", "Location", "Occupation", "Interests", "Education", etc.)
+- "value": The specific value for this identity
+
+Guidelines:
+- Only extract concrete, factual information explicitly stated or strongly implied
+- Keep characteristic names generic and reusable (Name, Age, Location, etc.)
+- Keep values concise but specific
+- Extract 5-15 characteristics depending on the detail provided
+- Common categories: Name, Age, Gender, Location, Occupation, Education, Interests, Hobbies, Skills, Personality traits
+
+Return ONLY the JSON object, nothing else.
+
+Example format:
+{
+  "characteristics": [
+    {"name": "Favorite Food", "value": "Eucalyptus leaves"},
+    {"name": "Age", "value": "2 years old"}
+  ]
+}`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `Identity Name: "${identityName}"${existingCharsText}\n\nNew Description to Extract From:\n${prompt}`,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 1500,
+    });
+
+    const content = completion.choices[0].message.content?.trim() || "{}";
+    console.log("Background: Extraction response received");
+
+    const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
+    const result = JSON.parse(jsonContent);
+
+    // Ensure characteristics have IDs
+    if (result.characteristics) {
+      result.characteristics = result.characteristics.map(
+        (char: any, idx: number) => ({
+          id: `char-${Date.now()}-${idx}`,
+          name: char.name,
+          value: char.value,
+        }),
+      );
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Background: Characteristic extraction error:", error);
+    throw error;
+  }
+}
+
+async function generateSummaryFromCharacteristics(
+  characteristics: any[],
+  identityName: string,
+) {
+  try {
+    console.log("Background: Generating summary from characteristics");
+
+    if (!characteristics || characteristics.length === 0) {
+      return { summary: "No characteristics defined yet." };
+    }
+
+    const characteristicsList = characteristics
+      .map((c) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+
+    const systemPrompt = `You are a privacy assistant that creates concise identity summaries.
+
+Your task: Given a list of characteristics about a person, create a natural, concise 2-3 sentence summary that captures the essence of who they are.
+
+Guidelines:
+- Write in third person
+- Be concise but comprehensive
+- Highlight the most defining characteristics
+- Make it flow naturally as a paragraph
+- Focus on what makes this identity unique
+
+Return ONLY the summary text, nothing else. No JSON, no quotes, just the summary paragraph.`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `Identity Name: "${identityName}"\n\nCharacteristics:\n${characteristicsList}`,
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 300,
+    });
+
+    const summary = completion.choices[0].message.content?.trim() || "";
+    console.log("Background: Summary generation response received");
+
+    return { summary };
+  } catch (error) {
+    console.error("Background: Summary generation error:", error);
     throw error;
   }
 }

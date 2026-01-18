@@ -1,8 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Identity, Characteristic } from '../types/identity';
-import { PREDEFINED_ATTRIBUTES } from '../constants/attributes';
-import { generateDescriptionFromCharacteristics } from '../utils/gemini';
-import { getOpenAIApiKey, saveOpenAIApiKey } from '../utils/storage';
 import './IdentityEditor.css';
 
 interface IdentityEditorProps {
@@ -16,13 +13,9 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
   const [profilePicture, setProfilePicture] = useState(identity?.profilePicture || '');
   const [prompt, setPrompt] = useState(identity?.prompt || '');
   const [characteristics, setCharacteristics] = useState<Characteristic[]>(identity?.characteristics || []);
-  const [selectedAttribute, setSelectedAttribute] = useState('');
-  const [customAttributeName, setCustomAttributeName] = useState('');
-  const [attributeValue, setAttributeValue] = useState('');
+  const [summary, setSummary] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
 
   // Update state when identity prop changes
   useEffect(() => {
@@ -31,14 +24,8 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
       setProfilePicture(identity.profilePicture);
       setPrompt(identity.prompt);
       setCharacteristics(identity.characteristics || []);
-      setSelectedAttribute('');
-      setCustomAttributeName('');
-      setAttributeValue('');
+      setSummary(identity.summary || '');
     }
-    // Load API key on mount
-    getOpenAIApiKey().then(key => {
-      if (key) setApiKey(key);
-    });
   }, [identity?.id]);
 
   const handleProfilePictureChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -83,105 +70,146 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!identity) return;
 
-    const updatedIdentity: Identity = {
-      ...identity,
-      name: tempName || 'Unnamed',
-      profilePicture,
-      prompt,
-      characteristics
-    };
-
-    onSave(updatedIdentity);
-    onNameChange(tempName || 'Unnamed');
-    setSaveStatus('Saved!');
-    setTimeout(() => setSaveStatus(''), 2000);
-  };
-
-  const handleAddCharacteristic = () => {
-    let charName = '';
-    
-    if (selectedAttribute === 'Custom Attribute') {
-      if (!customAttributeName.trim() || !attributeValue.trim()) {
-        alert('Please enter both attribute name and value');
-        return;
-      }
-      charName = customAttributeName;
-    } else if (selectedAttribute) {
-      if (!attributeValue.trim()) {
-        alert('Please enter a value');
-        return;
-      }
-      charName = selectedAttribute;
-    } else {
-      alert('Please select an attribute');
+    if (!prompt.trim()) {
+      alert('Please enter a prompt description');
       return;
     }
 
-    const newChar: Characteristic = {
-      id: Date.now().toString(),
-      name: charName,
-      value: attributeValue
-    };
+    setIsExtracting(true);
+    setSaveStatus('Extracting characteristics...');
 
-    setCharacteristics([...characteristics, newChar]);
-    setSelectedAttribute('');
-    setCustomAttributeName('');
-    setAttributeValue('');
-  };
-
-  const handleUpdateCharacteristic = (id: string, name: string, value: string) => {
-    setCharacteristics(
-      characteristics.map(char =>
-        char.id === id ? { ...char, name, value } : char
-      )
-    );
-  };
-
-  const handleGenerateDescription = async () => {
-    if (!apiKey.trim()) {
-      alert('API key not found. Please enter your Blackboard AI API key.');
-      setShowApiKeyInput(true);
-      return;
-    }
-
-    if (characteristics.length === 0) {
-      alert('Please add some characteristics first');
-      return;
-    }
-
-    setIsGenerating(true);
     try {
-      const generated = await generateDescriptionFromCharacteristics(
-        apiKey,
-        characteristics,
-        tempName
-      );
-      setPrompt(generated);
-      setSaveStatus('Generated!');
+      // Extract characteristics from prompt
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          {
+            type: 'extractCharacteristics',
+            prompt: prompt,
+            identityName: tempName || 'Unnamed',
+            existingCharacteristics: characteristics
+          },
+          (response) => {
+            if (response.success) {
+              resolve(response.data);
+            } else {
+              reject(new Error(response.error));
+            }
+          }
+        );
+      });
+      
+      // Merge new characteristics with existing ones (additive)
+      const existingChars = characteristics;
+      const newChars = result.characteristics || [];
+      
+      // Create a map of existing characteristics by name for easy lookup
+      const charMap = new Map(existingChars.map(c => [c.name.toLowerCase(), c]));
+      
+      // Add or update characteristics
+      newChars.forEach((newChar: Characteristic) => {
+        charMap.set(newChar.name.toLowerCase(), newChar);
+      });
+      
+      const mergedCharacteristics = Array.from(charMap.values());
+      setCharacteristics(mergedCharacteristics);
+
+      // Generate summary from ALL characteristics
+      setSaveStatus('Generating summary...');
+      const summaryResult = await new Promise<any>((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          {
+            type: 'generateSummary',
+            characteristics: mergedCharacteristics,
+            identityName: tempName || 'Unnamed'
+          },
+          (response) => {
+            if (response.success) {
+              resolve(response.data);
+            } else {
+              reject(new Error(response.error));
+            }
+          }
+        );
+      });
+
+      setSummary(summaryResult.summary || '');
+
+      const updatedIdentity: Identity = {
+        ...identity,
+        name: tempName || 'Unnamed',
+        profilePicture,
+        prompt: '', // Clear prompt after save
+        summary: summaryResult.summary || '',
+        characteristics: mergedCharacteristics
+      };
+
+      onSave(updatedIdentity);
+      onNameChange(tempName || 'Unnamed');
+      setPrompt(''); // Clear the prompt field
+      setSaveStatus('Saved!');
       setTimeout(() => setSaveStatus(''), 2000);
     } catch (error) {
-      alert(`Error generating description: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      alert(`Failed to extract characteristics: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setSaveStatus('');
     } finally {
-      setIsGenerating(false);
+      setIsExtracting(false);
     }
   };
 
-  const handleSaveApiKey = async () => {
-    if (!apiKey.trim()) {
-      alert('Please enter an API key');
-      return;
+  const handleDeleteCharacteristic = async (id: string) => {
+    const updatedChars = characteristics.filter(char => char.id !== id);
+    setCharacteristics(updatedChars);
+    
+    // Regenerate summary with updated characteristics
+    if (identity && updatedChars.length > 0) {
+      try {
+        const summaryResult = await new Promise<any>((resolve, reject) => {
+          chrome.runtime.sendMessage(
+            {
+              type: 'generateSummary',
+              characteristics: updatedChars,
+              identityName: tempName || identity.name
+            },
+            (response) => {
+              if (response.success) {
+                resolve(response.data);
+              } else {
+                reject(new Error(response.error));
+              }
+            }
+          );
+        });
+        
+        setSummary(summaryResult.summary || '');
+        
+        const updatedIdentity: Identity = {
+          ...identity,
+          summary: summaryResult.summary || '',
+          characteristics: updatedChars
+        };
+        onSave(updatedIdentity);
+      } catch (error) {
+        console.error('Failed to regenerate summary:', error);
+        // Save anyway without summary update
+        const updatedIdentity: Identity = {
+          ...identity,
+          characteristics: updatedChars
+        };
+        onSave(updatedIdentity);
+      }
+    } else if (identity) {
+      // No characteristics left, clear summary
+      setSummary('');
+      const updatedIdentity: Identity = {
+        ...identity,
+        summary: '',
+        characteristics: updatedChars
+      };
+      onSave(updatedIdentity);
     }
-    await saveOpenAIApiKey(apiKey);
-    setShowApiKeyInput(false);
-    setSaveStatus('API key saved!');
-    setTimeout(() => setSaveStatus(''), 2000);
-  };
-
-  const handleDeleteCharacteristic = (id: string) => {
-    setCharacteristics(characteristics.filter(char => char.id !== id));
   };
 
   if (!identity) {
@@ -230,131 +258,52 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
 
         {/* Prompt Section */}
         <div className="form-section">
-          <div className="prompt-header">
-            <label htmlFor="prompt">Prompt</label>
-            <button
-              className="generate-btn"
-              onClick={handleGenerateDescription}
-              type="button"
-              disabled={isGenerating || characteristics.length === 0}
-              title={characteristics.length === 0 ? 'Add characteristics first' : 'Generate with AI'}
-            >
-              {isGenerating ? 'Generating...' : '✨ Generate'}
-            </button>
-          </div>
+          <label htmlFor="prompt">Identity Description</label>
           <textarea
             id="prompt"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Enter prompt..."
+            placeholder="Describe this identity in detail. For example: 'I am a Quokka, I like to eat leaves. I am 2 years old and my hobby is eating leaves.'"
             className="textarea"
-            rows={6}
+            rows={8}
           />
-          {showApiKeyInput && (
-            <div className="api-key-input-section">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Enter your Blackboard AI API key"
-                className="api-key-input"
-                onKeyPress={(e) => e.key === 'Enter' && handleSaveApiKey()}
-              />
-              <button
-                className="save-api-key-btn"
-                onClick={handleSaveApiKey}
-                type="button"
-              >
-                Save Key
-              </button>
-              <button
-                className="cancel-api-key-btn"
-                onClick={() => setShowApiKeyInput(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Characteristics Section */}
+        {/* Summary Section - Read Only */}
         <div className="form-section">
-          <label>Identity Characteristics</label>
-          <div className="characteristics-list">
-            {characteristics.map((char) => (
-              <div key={char.id} className="characteristic-item">
-                <span className="char-name">{char.name}:</span>
-                <input
-                  type="text"
-                  value={char.value}
-                  onChange={(e) => handleUpdateCharacteristic(char.id, char.name, e.target.value)}
-                  placeholder="Enter value"
-                  className="char-value-input"
-                />
-                <button
-                  className="delete-char-btn"
-                  onClick={() => handleDeleteCharacteristic(char.id)}
-                  type="button"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="add-characteristic">
-            <select
-              value={selectedAttribute}
-              onChange={(e) => {
-                setSelectedAttribute(e.target.value);
-                if (e.target.value !== 'Custom Attribute') {
-                  setCustomAttributeName('');
-                }
-              }}
-              className="attribute-select"
-            >
-              <option value="">Select an attribute...</option>
-              {PREDEFINED_ATTRIBUTES.map((attr) => (
-                <option key={attr} value={attr}>
-                  {attr}
-                </option>
-              ))}
-            </select>
-
-            {selectedAttribute === 'Custom Attribute' && (
-              <input
-                type="text"
-                value={customAttributeName}
-                onChange={(e) => setCustomAttributeName(e.target.value)}
-                placeholder="Custom attribute name"
-                className="custom-attr-input"
-                onKeyPress={(e) => e.key === 'Enter' && handleAddCharacteristic()}
-              />
-            )}
-
-            <input
-              type="text"
-              value={attributeValue}
-              onChange={(e) => setAttributeValue(e.target.value)}
-              placeholder="Value"
-              className="attr-value-input"
-              onKeyPress={(e) => e.key === 'Enter' && handleAddCharacteristic()}
-            />
-            <button
-              className="add-char-btn"
-              onClick={handleAddCharacteristic}
-              type="button"
-            >
-              Add
-            </button>
+          <label>Identity Summary</label>
+          <div className="summary-box">
+            {summary || 'No summary yet. Add information above and click Save to generate a summary.'}
           </div>
         </div>
+
+        {/* Characteristics Section - Read Only */}
+        {characteristics.length > 0 && (
+          <div className="form-section">
+            <label>Extracted Characteristics</label>
+            <div className="characteristics-display">
+              {characteristics.map((char) => (
+                <div key={char.id} className="characteristic-display-item">
+                  <button
+                    className="delete-characteristic-btn"
+                    onClick={() => handleDeleteCharacteristic(char.id)}
+                    title="Remove characteristic"
+                    type="button"
+                  >
+                    ✕
+                  </button>
+                  <span className="char-display-name">{char.name}:</span>
+                  <span className="char-display-value">{char.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Save Button */}
         <div className="form-actions">
-          <button onClick={handleSave} className="save-btn">
-            Save Changes
+          <button onClick={handleSave} className="save-btn" disabled={isExtracting}>
+            {isExtracting ? 'Extracting & Saving...' : 'Save Changes'}
           </button>
           {saveStatus && <span className="save-status">{saveStatus}</span>}
         </div>

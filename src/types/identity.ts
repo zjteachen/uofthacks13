@@ -9,6 +9,7 @@ export interface Identity {
   name: string;
   profilePicture: string; // Base64 or URL
   prompt: string;
+  summary: string;
   characteristics: Characteristic[];
   createdAt: number;
 }

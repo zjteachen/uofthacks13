@@ -36,6 +36,7 @@ function Options() {
       name: 'New Identity',
       profilePicture: '',
       prompt: '',
+      summary: '',
       characteristics: [],
       createdAt: Date.now()
     };

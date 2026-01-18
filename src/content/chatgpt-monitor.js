@@ -1,7 +1,7 @@
 // ==========================================
 // FEATURE TOGGLES (for testing/debugging)
 // ==========================================
-const ENABLE_INPUT_MONITORING = false; // Monitor outgoing messages for personal info
+const ENABLE_INPUT_MONITORING = true; // Monitor outgoing messages for personal info
 const ENABLE_RESPONSE_MONITORING = true; // Monitor AI responses for privacy violations
 const ENABLE_VERBOSE_LOGGING = false; // Reduce console spam when false
 
@@ -634,11 +634,16 @@ async function sendMessageToChatApp(message, options = {}) {
   const { skipPrivacyCheck = true } = options;
 
   if (!currentTextarea || !message) {
-    console.error("Privacy Guard: Cannot send message - no textarea found or empty message");
+    console.error(
+      "Privacy Guard: Cannot send message - no textarea found or empty message",
+    );
     return { success: false, error: "No textarea or message" };
   }
 
-  console.log("Privacy Guard: Sending message to chat app:", message.substring(0, 50) + "...");
+  console.log(
+    "Privacy Guard: Sending message to chat app:",
+    message.substring(0, 50) + "...",
+  );
 
   // Set textarea content
   if (currentTextarea.value !== undefined) {
@@ -679,7 +684,9 @@ async function sendMessageToChatApp(message, options = {}) {
 function showPollutionConfirmationModal(generatedMessage) {
   return new Promise((resolve) => {
     // Remove existing modal if present
-    const existingModal = document.getElementById("pollution-confirmation-modal");
+    const existingModal = document.getElementById(
+      "pollution-confirmation-modal",
+    );
     if (existingModal) {
       existingModal.remove();
     }
@@ -740,7 +747,7 @@ async function generatePollutionMessage(toDeny, toPollute) {
         } else {
           reject(new Error(response?.error || "Failed to generate message"));
         }
-      }
+      },
     );
   });
 }
@@ -784,11 +791,15 @@ async function analyzeAssistantResponse(responseText) {
       try {
         // Generate the pollution message
         console.log("Privacy Guard: Generating pollution message...");
-        const generatedMessage = await generatePollutionMessage(toDeny, toPollute);
+        const generatedMessage = await generatePollutionMessage(
+          toDeny,
+          toPollute,
+        );
         console.log("Privacy Guard: Generated message:", generatedMessage);
 
         // Show confirmation modal
-        const confirmResult = await showPollutionConfirmationModal(generatedMessage);
+        const confirmResult =
+          await showPollutionConfirmationModal(generatedMessage);
 
         if (confirmResult.action === "send") {
           // Send the message to the chat
@@ -796,7 +807,10 @@ async function analyzeAssistantResponse(responseText) {
           if (sendResult.success) {
             console.log("Privacy Guard: Pollution message sent successfully");
           } else {
-            console.error("Privacy Guard: Failed to send message:", sendResult.error);
+            console.error(
+              "Privacy Guard: Failed to send message:",
+              sendResult.error,
+            );
           }
         }
       } catch (error) {
@@ -898,7 +912,9 @@ function setupResponseMonitoring() {
     if (initialContent === contentAfterWait && initialContent.length > 100) {
       // Content is static and substantial - likely an old message from chat switch
       if (ENABLE_VERBOSE_LOGGING) {
-        console.log("Privacy Guard: Skipping static message (likely chat switch)");
+        console.log(
+          "Privacy Guard: Skipping static message (likely chat switch)",
+        );
       }
       processingResponse = false;
       return;
