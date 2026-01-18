@@ -1098,8 +1098,10 @@ async function updateFakeIdentityFromPollution(identityId, fakeValues) {
 
     // Save back to storage
     await chrome.storage.sync.set({ identities });
-    console.log("Privacy Guard: Fake identity updated successfully with values:",
-      fakeValues.map(fv => `${fv.category}: ${fv.fakeValue}`).join(", "));
+    console.log(
+      "Privacy Guard: Fake identity updated successfully with values:",
+      fakeValues.map((fv) => `${fv.category}: ${fv.fakeValue}`).join(", "),
+    );
   } catch (error) {
     console.error("Privacy Guard: Error updating fake identity:", error);
   }
@@ -1192,19 +1194,15 @@ const JANUS_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -10 
 
 // Selectors for ChatGPT action buttons (Copy, Like, Dislike, etc.)
 const ACTION_BUTTON_SELECTORS = [
-  'button[aria-label="Copy"]',
   'button[aria-label="Good response"]',
   'button[aria-label="Bad response"]',
-  'button[aria-label="Read aloud"]',
-  'button[data-testid="copy-turn-action-button"]',
-  'button[data-testid="good-response-turn-action-button"]',
-  'button[data-testid="bad-response-turn-action-button"]',
 ];
 
 // Check if an element is a finished (non-streaming) assistant message
 function isFinishedAssistantMessage(element) {
   if (!element) return false;
-  const isAssistant = element.getAttribute("data-message-author-role") === "assistant";
+  const isAssistant =
+    element.getAttribute("data-message-author-role") === "assistant";
   const isNotStreaming = !element.querySelector(".streaming-animation");
   return isAssistant && isNotStreaming;
 }
@@ -1236,6 +1234,7 @@ function injectJanusButton(messageElement) {
   if (actionBar.querySelector(".janus-analyze-btn")) {
     return true; // Already injected
   }
+  console.log("Found matching footer", actionBar);
 
   // Create Janus button
   const janusButton = document.createElement("button");
@@ -1254,11 +1253,17 @@ function injectJanusButton(messageElement) {
     }
 
     const messageText = messageElement.textContent?.trim() || "";
-    console.log("Janus: Analyzing message content:", messageText.substring(0, 100) + "...");
+    console.log(
+      "Janus: Analyzing message content:",
+      messageText.substring(0, 100) + "...",
+    );
 
     // Start loading state: spin icon and show toast
     janusButton.classList.add("janus-analyzing");
-    const dismissToast = showToast("Analyzing with Janus...", { persistent: true, color: "#8B5CF6" });
+    const dismissToast = showToast("Analyzing with Janus...", {
+      persistent: true,
+      color: "#8B5CF6",
+    });
 
     try {
       // Run the privacy violation detection
@@ -1273,6 +1278,7 @@ function injectJanusButton(messageElement) {
   // Insert at the beginning of the action bar
   actionBar.insertBefore(janusButton, actionBar.firstChild);
   console.log("Janus: Button injected");
+  console.log(janusButton);
   return true;
 }
 
@@ -1305,7 +1311,7 @@ function scheduleProcessMessage(messageElement) {
   if (processTimeout) clearTimeout(processTimeout);
 
   processTimeout = setTimeout(() => {
-    pendingMessages.forEach(msg => {
+    pendingMessages.forEach((msg) => {
       if (isFinishedAssistantMessage(msg)) {
         processFinishedMessage(msg);
       }
@@ -1357,14 +1363,17 @@ function setupResponseMonitoring() {
     for (const mutation of mutationsList) {
       // Handle new nodes or text changes (page load, chat switch, new messages)
       if (mutation.type === "childList" || mutation.type === "characterData") {
-        const target = mutation.target.nodeType === Node.TEXT_NODE
-          ? mutation.target.parentElement
-          : mutation.target;
+        const target =
+          mutation.target.nodeType === Node.TEXT_NODE
+            ? mutation.target.parentElement
+            : mutation.target;
 
         if (!target) continue;
 
         // Check if this mutation affects an assistant message
-        const messageNode = target.closest("[data-message-author-role='assistant']");
+        const messageNode = target.closest(
+          "[data-message-author-role='assistant']",
+        );
         if (messageNode && isFinishedAssistantMessage(messageNode)) {
           scheduleProcessMessage(messageNode);
         }
@@ -1382,9 +1391,11 @@ function setupResponseMonitoring() {
             }
 
             // Check for assistant messages within the added node
-            const messages = node.querySelectorAll?.("[data-message-author-role='assistant']");
+            const messages = node.querySelectorAll?.(
+              "[data-message-author-role='assistant']",
+            );
             if (messages) {
-              messages.forEach(msg => {
+              messages.forEach((msg) => {
                 if (isFinishedAssistantMessage(msg)) {
                   scheduleProcessMessage(msg);
                 }
@@ -1395,8 +1406,13 @@ function setupResponseMonitoring() {
       }
 
       // Handle streaming completion (class attribute changes)
-      if (mutation.type === "attributes" && mutation.attributeName === "class") {
-        const parentMessage = mutation.target.closest("[data-message-author-role='assistant']");
+      if (
+        mutation.type === "attributes" &&
+        mutation.attributeName === "class"
+      ) {
+        const parentMessage = mutation.target.closest(
+          "[data-message-author-role='assistant']",
+        );
         if (parentMessage && isFinishedAssistantMessage(parentMessage)) {
           scheduleProcessMessage(parentMessage);
         }
@@ -1414,9 +1430,13 @@ function setupResponseMonitoring() {
 
   // Also process any existing messages on the page
   setTimeout(() => {
-    const existingMessages = document.querySelectorAll("[data-message-author-role='assistant']");
-    console.log(`Privacy Guard: Found ${existingMessages.length} existing messages`);
-    existingMessages.forEach(msg => {
+    const existingMessages = document.querySelectorAll(
+      "[data-message-author-role='assistant']",
+    );
+    console.log(
+      `Privacy Guard: Found ${existingMessages.length} existing messages`,
+    );
+    existingMessages.forEach((msg) => {
       if (isFinishedAssistantMessage(msg)) {
         processFinishedMessage(msg);
       }
