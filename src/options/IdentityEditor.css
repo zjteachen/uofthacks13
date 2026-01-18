@@ -383,3 +383,16 @@
   color: #333;
   word-break: break-word;
 }
+
+/* Save status indicators */
+.save-status {
+  color: #34a853;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.unsaved-indicator {
+  color: #ea8600;
+  font-size: 14px;
+  font-style: italic;
+}

@@ -1,14 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Identity, Characteristic } from '../types/identity';
 import './IdentityEditor.css';
 
 interface IdentityEditorProps {
   identity: Identity | null;
   onSave: (identity: Identity) => void;
-  onNameChange: (name: string) => void;
 }
 
-function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps) {
+function IdentityEditor({ identity, onSave }: IdentityEditorProps) {
   const [tempName, setTempName] = useState(identity?.name || '');
   const [profilePicture, setProfilePicture] = useState(identity?.profilePicture || '');
   const [prompt, setPrompt] = useState(identity?.prompt || '');
@@ -16,15 +15,39 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
   const [summary, setSummary] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // Update state when identity prop changes
+  // Track previous identity to auto-save when switching
+  const previousIdentityRef = useRef<Identity | null>(null);
+
+  // Auto-save when switching identities (before loading new one)
   useEffect(() => {
+    const previousIdentity = previousIdentityRef.current;
+
+    // If we had a previous identity and there are unsaved changes, save them
+    if (previousIdentity && hasUnsavedChanges && previousIdentity.id !== identity?.id) {
+      const updatedIdentity: Identity = {
+        ...previousIdentity,
+        name: tempName || previousIdentity.name,
+        profilePicture,
+        prompt,
+        summary,
+        characteristics
+      };
+      onSave(updatedIdentity);
+      setHasUnsavedChanges(false);
+    }
+
+    // Update ref and load new identity
+    previousIdentityRef.current = identity;
+
     if (identity) {
       setTempName(identity.name);
       setProfilePicture(identity.profilePicture);
       setPrompt(identity.prompt);
       setCharacteristics(identity.characteristics || []);
       setSummary(identity.summary || '');
+      setHasUnsavedChanges(false);
     }
   }, [identity?.id]);
 
@@ -62,12 +85,23 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
             ctx.drawImage(img, 0, 0, width, height);
             const compressed = canvas.toDataURL('image/jpeg', 0.7);
             setProfilePicture(compressed);
+            setHasUnsavedChanges(true);
           }
         };
         img.src = base64;
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleNameInputChange = (value: string) => {
+    setTempName(value);
+    setHasUnsavedChanges(true);
+  };
+
+  const handlePromptChange = (value: string) => {
+    setPrompt(value);
+    setHasUnsavedChanges(true);
   };
 
   const handleSave = async () => {
@@ -147,8 +181,8 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
       };
 
       onSave(updatedIdentity);
-      onNameChange(tempName || 'Unnamed');
       setPrompt(''); // Clear the prompt field
+      setHasUnsavedChanges(false);
       setSaveStatus('Saved!');
       setTimeout(() => setSaveStatus(''), 2000);
     } catch (error) {
@@ -159,57 +193,11 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
     }
   };
 
-  const handleDeleteCharacteristic = async (id: string) => {
+  const handleDeleteCharacteristic = (id: string) => {
     const updatedChars = characteristics.filter(char => char.id !== id);
     setCharacteristics(updatedChars);
-    
-    // Regenerate summary with updated characteristics
-    if (identity && updatedChars.length > 0) {
-      try {
-        const summaryResult = await new Promise<any>((resolve, reject) => {
-          chrome.runtime.sendMessage(
-            {
-              type: 'generateSummary',
-              characteristics: updatedChars,
-              identityName: tempName || identity.name
-            },
-            (response) => {
-              if (response.success) {
-                resolve(response.data);
-              } else {
-                reject(new Error(response.error));
-              }
-            }
-          );
-        });
-        
-        setSummary(summaryResult.summary || '');
-        
-        const updatedIdentity: Identity = {
-          ...identity,
-          summary: summaryResult.summary || '',
-          characteristics: updatedChars
-        };
-        onSave(updatedIdentity);
-      } catch (error) {
-        console.error('Failed to regenerate summary:', error);
-        // Save anyway without summary update
-        const updatedIdentity: Identity = {
-          ...identity,
-          characteristics: updatedChars
-        };
-        onSave(updatedIdentity);
-      }
-    } else if (identity) {
-      // No characteristics left, clear summary
-      setSummary('');
-      const updatedIdentity: Identity = {
-        ...identity,
-        summary: '',
-        characteristics: updatedChars
-      };
-      onSave(updatedIdentity);
-    }
+    setHasUnsavedChanges(true);
+    // Note: Summary will be regenerated when user clicks Save
   };
 
   if (!identity) {
@@ -250,7 +238,7 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
             id="identity-name"
             type="text"
             value={tempName}
-            onChange={(e) => setTempName(e.target.value)}
+            onChange={(e) => handleNameInputChange(e.target.value)}
             placeholder="Enter identity name"
             className="text-input"
           />
@@ -262,7 +250,7 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
           <textarea
             id="prompt"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => handlePromptChange(e.target.value)}
             placeholder="Describe this identity in detail. For example: 'I am a Quokka, I like to eat leaves. I am 2 years old and my hobby is eating leaves.'"
             className="textarea"
             rows={8}
@@ -306,6 +294,7 @@ function IdentityEditor({ identity, onSave, onNameChange }: IdentityEditorProps)
             {isExtracting ? 'Extracting & Saving...' : 'Save Changes'}
           </button>
           {saveStatus && <span className="save-status">{saveStatus}</span>}
+          {hasUnsavedChanges && !saveStatus && <span className="unsaved-indicator">Unsaved changes</span>}
         </div>
       </div>
     </div>
