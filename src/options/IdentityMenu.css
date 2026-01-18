@@ -1,42 +1,54 @@
 .identity-menu {
   width: 280px;
-  border-right: 1px solid #eee;
+  background: #0D2A38;
+  border-right: 1px solid #1D546D;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh;
 }
 
 .menu-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid #eee;
+  padding: 24px 20px;
+  border-bottom: 1px solid rgba(29, 84, 109, 0.5);
+  backdrop-filter: blur(10px);
 }
 
 .menu-header h2 {
   margin: 0;
   font-size: 18px;
-  color: #333;
+  color: #F3F4F4;
+  font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .add-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background-color: #4285f4;
-  color: white;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #5F9598;
+  color: #061E29;
   border: none;
   cursor: pointer;
   font-size: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(95, 149, 152, 0.3);
 }
 
 .add-btn:hover {
-  background-color: #3367d6;
+  background: #6FA9AC;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(95, 149, 152, 0.4);
+}
+
+.add-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(95, 149, 152, 0.3);
 }
 
 .identities-list {
@@ -45,33 +57,57 @@
   padding: 8px;
 }
 
+.identities-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.identities-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.identities-list::-webkit-scrollbar-thumb {
+  background: #1D546D;
+  border-radius: 3px;
+}
+
+.identities-list::-webkit-scrollbar-thumb:hover {
+  background: #5F9598;
+}
+
 .identity-card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
+  padding: 14px;
   margin-bottom: 8px;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: background-color 0.2s;
-  position: relative;
+  background: rgba(13, 42, 56, 0.4);
+  border: 1px solid transparent;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .identity-card:hover {
-  background-color: #f5f5f5;
+  background: rgba(29, 84, 109, 0.3);
+  border-color: #1D546D;
+  transform: translateX(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .identity-card.active {
-  background-color: #e8f0fe;
-  border-left: 4px solid #4285f4;
+  background: rgba(95, 149, 152, 0.2);
+  border-color: #5F9598;
+  box-shadow: 0 4px 16px rgba(95, 149, 152, 0.15), 0 0 0 1px #5F9598;
 }
 
 .profile-pic {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;
+  border: 2px solid #1D546D;
 }
 
 .identity-info {
@@ -82,29 +118,42 @@
 .identity-info h3 {
   margin: 0;
   font-size: 14px;
-  color: #333;
+  color: #F3F4F4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 .delete-btn {
-  background: none;
+  background: transparent;
   border: none;
-  color: #999;
+  color: #F3F4F4;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 16px;
   padding: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0;
-  transition: opacity 0.2s, color 0.2s;
+  transition: all 0.15s ease;
 }
 
 .identity-card:hover .delete-btn {
-  opacity: 1;
+  opacity: 0.6;
 }
 
 .delete-btn:hover {
-  color: #d32f2f;
+  opacity: 1 !important;
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.delete-btn:active {
+  transform: scale(0.95);
 }
 
 .empty-state {
@@ -113,24 +162,33 @@
   align-items: center;
   justify-content: center;
   height: 200px;
-  color: #999;
-  gap: 12px;
+  color: #5F9598;
+  gap: 16px;
+  padding: 20px;
 }
 
 .empty-state p {
   margin: 0;
-}
-
-.empty-state button {
-  background-color: #4285f4;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
-  cursor: pointer;
   font-size: 14px;
 }
 
+.empty-state button {
+  background: #5F9598;
+  color: #061E29;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
 .empty-state button:hover {
-  background-color: #3367d6;
+  background: #6FA9AC;
+  transform: scale(1.02);
+}
+
+.empty-state button:active {
+  transform: scale(0.98);
 }

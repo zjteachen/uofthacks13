@@ -209,6 +209,14 @@ function IdentityEditor({ identity, onSave }: IdentityEditorProps) {
     }
   };
 
+  const handleCharacteristicChange = (id: string, field: 'name' | 'value', newValue: string) => {
+    const updatedChars = characteristics.map(char =>
+      char.id === id ? { ...char, [field]: newValue } : char
+    );
+    setCharacteristics(updatedChars);
+    setHasUnsavedChanges(true);
+  };
+
   const handleDeleteCharacteristic = (id: string) => {
     const updatedChars = characteristics.filter(char => char.id !== id);
     setCharacteristics(updatedChars);
@@ -346,7 +354,7 @@ function IdentityEditor({ identity, onSave }: IdentityEditorProps) {
           </div>
         </div>
 
-        {/* Characteristics Section - Read Only */}
+        {/* Characteristics Section - Editable */}
         {characteristics.length > 0 && (
           <div className="form-section">
             <label>Extracted Characteristics</label>
@@ -361,8 +369,20 @@ function IdentityEditor({ identity, onSave }: IdentityEditorProps) {
                   >
                     ✕
                   </button>
-                  <span className="char-display-name">{char.name}:</span>
-                  <span className="char-display-value">{char.value}</span>
+                  <input
+                    type="text"
+                    value={char.name}
+                    onChange={(e) => handleCharacteristicChange(char.id, 'name', e.target.value)}
+                    className="char-name-input"
+                    placeholder="Characteristic name"
+                  />
+                  <input
+                    type="text"
+                    value={char.value}
+                    onChange={(e) => handleCharacteristicChange(char.id, 'value', e.target.value)}
+                    className="char-value-input"
+                    placeholder="Characteristic value"
+                  />
                 </div>
               ))}
             </div>
