@@ -96,7 +96,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     extractCharacteristicsFromPrompt(
       request.prompt,
       request.identityName,
-      request.existingCharacteristics || []
+      request.existingCharacteristics || [],
     )
       .then((result) => {
         console.log("Background: Extraction complete, sending response");
@@ -114,10 +114,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     console.log("Background: Generating summary from characteristics");
     generateSummaryFromCharacteristics(
       request.characteristics,
-      request.identityName
+      request.identityName,
     )
       .then((result) => {
-        console.log("Background: Summary generation complete, sending response");
+        console.log(
+          "Background: Summary generation complete, sending response",
+        );
         sendResponse({ success: true, data: result });
       })
       .catch((error) => {
@@ -132,7 +134,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     console.log("Background: Generating switch pollution message");
     generateSwitchPollutionMessage(
       request.previousIdentity,
-      request.newIdentity
+      request.newIdentity,
     )
       .then((result) => {
         console.log("Background: Switch pollution message generation complete");
@@ -150,7 +152,9 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     console.log("Background: Generating fake identity");
     generateFakeIdentity(request.characteristics)
       .then((result) => {
-        console.log("Background: Fake identity generation complete, sending response");
+        console.log(
+          "Background: Fake identity generation complete, sending response",
+        );
         sendResponse({ success: true, data: result });
       })
       .catch((error) => {
@@ -295,45 +299,55 @@ async function detectPrivacyViolationsInResponse(
   identity: any,
 ) {
   try {
-    const characteristicsList = identity.characteristics
-      .map((c: any) => `- ${c.name}: ${c.value}`)
-      .join("\n");
+    // Combine all characteristics into one allowed list (no distinction between real/fake)
+    const allCharacteristics = [
+      ...(identity.characteristics || []),
+      ...(identity.fakeCharacteristics || []),
+    ];
 
-    // Include fake characteristics as allowed information
-    const fakeCharacteristicsList = (identity.fakeCharacteristics || [])
+    const allowedInfoList = allCharacteristics
       .map((c: any) => `- ${c.name}: ${c.value}`)
       .join("\n");
 
     console.log("responseText", responseText);
     console.log("identity", identity);
 
-    const allowedInfo = fakeCharacteristicsList
-      ? `${characteristicsList}\n\nFAKE/OBFUSCATED INFORMATION (also allowed):\n${fakeCharacteristicsList}`
-      : characteristicsList;
-
-    const prompt = `You are a privacy auditor. Analyze the AI assistant's response to detect if it reveals that it KNOWS information about the user that goes BEYOND their allowed privacy profile.
+    const prompt = `You are a privacy auditor. Analyze the AI assistant's response to detect personal information it knows about the user that is NOT part of their approved privacy profile.
 
 PRIVACY PROFILE: "${identity.name}"
-Information the user has chosen to share:
-${allowedInfo}
+ALLOWED information (DO NOT flag if the AI mentions these):
+${allowedInfoList}
 
-AI RESPONSE TO ANALYZE:
-${responseText}
+YOUR TASK: Flag ONLY information that goes BEYOND or is NOT COVERED by the allowed profile above.
 
-Your task: Identify any statements where the AI demonstrates knowledge of user information that is:
-1. MORE SPECIFIC than what's in the profile (e.g., profile says "Canada" but AI mentions "Toronto")
-2. NOT COVERED by any characteristic in the profile (e.g., AI mentions user's email but no email in profile)
-3. INFERRED beyond what was explicitly shared (e.g., AI assumes user's age from context)
+DO NOT FLAG if the information matches something in the allowed profile (even approximately).
+DO NOT FLAG generic responses or hypotheticals.
 
-IMPORTANT: If the AI mentions information that matches the FAKE/OBFUSCATED information, DO NOT flag it as a violation. This is expected and allowed.
+ONLY FLAG these categories of violations:
+
+1. IDENTIFIERS NOT IN PROFILE:
+   - Names, usernames, phone numbers, emails, addresses NOT listed above
+   - Account names or handles NOT listed above
+
+2. INFORMATION MORE SPECIFIC THAN PROFILE:
+   - Profile says "Canada" but AI mentions "Toronto" (more specific)
+   - Profile says "software engineer" but AI mentions specific company name
+
+3. INFORMATION NOT COVERED BY ANY PROFILE ITEM:
+   - AI mentions user's age but no age in profile
+   - AI mentions user's relationship status but not in profile
+
+4. INFERRED BEHAVIORAL DATA:
+   - Patterns the AI claims to have noticed about the user
+   - Historical information from past conversations
 
 Return a JSON array of violations. Each item must have:
 - "knownInfo": what the AI claims to know (exact quote or paraphrase)
-- "category": "location", "personal_detail", "interest", "behavior", "relationship", etc.
-- "reason": why this exceeds the allowed profile
-- "severity": "high" (specific identifiers), "medium" (detailed inference), "low" (vague assumption)
+- "category": "identifier", "contact_info", "location", "personal_detail", "behavior", "relationship", etc.
+- "reason": why this is NOT covered by the allowed profile
+- "severity": "high" (direct identifiers), "medium" (specific personal details), "low" (vague inferences)
 
-Return [] if the AI only references information within the allowed profile bounds.
+If EVERYTHING the AI mentions is covered by the allowed profile, return [].
 Return ONLY the JSON array, nothing else.`;
     console.log("Prompt for information flagging: ", prompt);
 
@@ -341,14 +355,17 @@ Return ONLY the JSON array, nothing else.`;
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: prompt },
-        { role: "user", content: responseText },
+        {
+          role: "user",
+          content: `Here is the assistant response:\n\n${responseText}`,
+        },
       ],
       temperature: 0.2,
       max_tokens: 1500,
     });
 
     const content = completion.choices[0].message.content?.trim() || "[]";
-    console.log("Background: Violation detection response received");
+    console.log("Background: Violation detection response received", content);
 
     const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
     return JSON.parse(jsonContent);
@@ -358,10 +375,7 @@ Return ONLY the JSON array, nothing else.`;
   }
 }
 
-async function rewriteMessage(
-  originalText: string,
-  itemsToRemove: any[],
-) {
+async function rewriteMessage(originalText: string, itemsToRemove: any[]) {
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -417,25 +431,36 @@ Return ONLY the rewritten message text, nothing else.`,
 // Called via chrome.runtime.onMessage from content script
 async function checkContextNeededHandler(prompt: string, identity: any) {
   try {
-    if (!identity || !identity.characteristics || identity.characteristics.length === 0) {
-      console.log("Background: No identity characteristics, skipping context check");
+    if (
+      !identity ||
+      !identity.characteristics ||
+      identity.characteristics.length === 0
+    ) {
+      console.log(
+        "Background: No identity characteristics, skipping context check",
+      );
       return { needsContext: false, augmentedPrompt: prompt };
     }
 
     // Get Gemini API key - try storage first, then env variable
     let geminiApiKey = await new Promise<string | null>((resolve) => {
-      chrome.storage.local.get(['geminiApiKey'], (result) => {
+      chrome.storage.local.get(["geminiApiKey"], (result) => {
         resolve(result.geminiApiKey || null);
       });
     });
 
     // Fall back to env variable if not in storage
     if (!geminiApiKey) {
-      geminiApiKey = import.meta.env.VITE_GEMINI_API || import.meta.env.VITE_GEMINI_API_KEY || null;
+      geminiApiKey =
+        import.meta.env.VITE_GEMINI_API ||
+        import.meta.env.VITE_GEMINI_API_KEY ||
+        null;
     }
 
     if (!geminiApiKey) {
-      console.log("Background: No Gemini API key found (checked storage and env), skipping context check");
+      console.log(
+        "Background: No Gemini API key found (checked storage and env), skipping context check",
+      );
       return { needsContext: false, augmentedPrompt: prompt };
     }
 
@@ -485,7 +510,7 @@ Return a JSON object with:
 Return ONLY the JSON object, nothing else.`;
 
     console.log("Background: Calling Gemini to check context need...");
-    
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
       {
@@ -500,7 +525,7 @@ Return ONLY the JSON object, nothing else.`;
             temperature: 0.3,
           },
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -510,8 +535,9 @@ Return ONLY the JSON object, nothing else.`;
     }
 
     const data = await response.json();
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-    
+    const responseText =
+      data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
     console.log("Background: Gemini response:", responseText);
 
     // Parse the JSON response
@@ -531,11 +557,12 @@ Return ONLY the JSON object, nothing else.`;
     // Build the context prefix with only relevant characteristics
     const relevantChars = analysis.relevantCharacteristics || [];
     let selectedCharacteristics = identity.characteristics.filter((c: any) =>
-      relevantChars.some((r: string) => 
-        c.name.toLowerCase().includes(r.toLowerCase()) || 
-        r.toLowerCase().includes(c.name.toLowerCase()) ||
-        c.value.toLowerCase().includes(r.toLowerCase())
-      )
+      relevantChars.some(
+        (r: string) =>
+          c.name.toLowerCase().includes(r.toLowerCase()) ||
+          r.toLowerCase().includes(c.name.toLowerCase()) ||
+          c.value.toLowerCase().includes(r.toLowerCase()),
+      ),
     );
 
     // If no matches found but Gemini said context is needed, use all characteristics
@@ -551,13 +578,12 @@ Return ONLY the JSON object, nothing else.`;
     const augmentedPrompt = contextPrefix + prompt;
 
     console.log("Background: Augmented prompt with context");
-    return { 
-      needsContext: true, 
+    return {
+      needsContext: true,
       augmentedPrompt,
       reason: analysis.reason,
-      addedContext: contextPrefix
+      addedContext: contextPrefix,
     };
-
   } catch (error) {
     console.error("Background: Context check error:", error);
     return { needsContext: false, augmentedPrompt: prompt };
@@ -822,7 +848,10 @@ Output: A single, self-contained message that can be understood without any prio
 
     return { hasPollution: true, message, overlaps, denialsOnly };
   } catch (error) {
-    console.error("Background: Error generating switch pollution message:", error);
+    console.error(
+      "Background: Error generating switch pollution message:",
+      error,
+    );
     throw error;
   }
 }
