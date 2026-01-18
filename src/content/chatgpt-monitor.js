@@ -55,10 +55,7 @@ try {
 }
 
 // Response monitoring state
-let lastProcessedMessageId = null;
-let processingResponse = false;
 let responseObserver = null; // Track the observer to prevent duplicates
-let currentChatUrl = window.location.href; // Track current chat to detect navigation
 
 // Fetch the selected identity from chrome storage
 async function getSelectedIdentity() {
@@ -1165,7 +1162,7 @@ async function analyzeAssistantResponse(responseText) {
 }
 
 // ==========================================
-// JANUS BUTTON INJECTION
+// JANUS BUTTON INJECTION & RESPONSE MONITORING
 // ==========================================
 
 // Inline SVG for the Janus icon (purple two-faced logo)
@@ -1174,50 +1171,51 @@ const JANUS_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -10 
   <path fill="currentColor" d="m51.859 11.875c-0.84766-2.7344-3.9766-3.9492-6.4414-2.5273-4.1445 2.3906-9.8906 4.9609-17.062 6.2266s-13.453 0.81641-18.164-0.015625c-2.8008-0.49219-5.3242 1.7188-5.1875 4.5742 0.47266 9.7812 3.3906 29.184 18.523 39.215 2.2383 1.4844 5.2656 3.1094 9.1758 4.2891 2.7422 0.82812 5.7188 0.30469 8.0156-1.4141 3.2695-2.4453 5.5586-5.0078 7.1523-7.168 10.789-14.602 6.8945-33.828 3.9922-43.184zm-36.824 23.188c-0.72656 0.49219-1.6992-0.26172-1.3945-1.082 0.98047-2.6133 3.2852-4.6523 6.2227-5.1719 2.9414-0.51953 5.8008 0.60938 7.6172 2.7305 0.57031 0.66406-0.089844 1.707-0.9375 1.4922-1.8867-0.47656-3.9141-0.57031-5.9688-0.20703-2.0586 0.36328-3.9297 1.1406-5.5391 2.2344zm29.797 7.6484c-1.1133 4.5625-4.8281 8.25-9.7266 9.1133-4.9023 0.86328-9.6523-1.332-12.258-5.2383-0.5-0.75 0.1875-1.6992 1.0469-1.4258 3.1641 1.0117 6.6289 1.2852 10.152 0.66016 3.5273-0.62109 6.6875-2.0625 9.3125-4.0938 0.71484-0.55078 1.6875 0.10547 1.4727 0.98047zm2.707-13.379c-1.8867-0.47656-3.9141-0.57031-5.9688-0.20703-2.0586 0.36328-3.9297 1.1406-5.5391 2.2344-0.72656 0.49219-1.6992-0.26172-1.3945-1.082 0.98047-2.6133 3.2852-4.6523 6.2227-5.1719 2.9414-0.51953 5.8008 0.60938 7.6172 2.7305 0.57031 0.66406-0.089843 1.707-0.9375 1.4922z"/>
 </svg>`;
 
-// Track which messages already have Janus buttons injected
-const injectedMessageIds = new Set();
+// Selectors for ChatGPT action buttons (Copy, Like, Dislike, etc.)
+const ACTION_BUTTON_SELECTORS = [
+  'button[aria-label="Copy"]',
+  'button[aria-label="Good response"]',
+  'button[aria-label="Bad response"]',
+  'button[aria-label="Read aloud"]',
+  'button[data-testid="copy-turn-action-button"]',
+  'button[data-testid="good-response-turn-action-button"]',
+  'button[data-testid="bad-response-turn-action-button"]',
+];
 
-// Inject Janus button into an assistant message's action bar
-function injectJanusButton(messageElement, retryCount = 0) {
-  const MAX_RETRIES = 5;
-  const RETRY_DELAY = 300;
+// Check if an element is a finished (non-streaming) assistant message
+function isFinishedAssistantMessage(element) {
+  if (!element) return false;
+  const isAssistant = element.getAttribute("data-message-author-role") === "assistant";
+  const isNotStreaming = !element.querySelector(".streaming-animation");
+  return isAssistant && isNotStreaming;
+}
 
-  // Find the action button container by looking for specific action buttons
-  // ChatGPT action bars contain buttons with specific aria-labels like:
-  // "Copy", "Good response", "Bad response", "Read aloud"
-  let actionBar = null;
-  const article = messageElement.closest("article");
+// Find the action bar within an article element
+function findActionBar(article) {
+  if (!article) return null;
 
-  if (article) {
-    // Method 1: Find buttons with known aria-labels and get their container
-    const actionButtonSelectors = [
-      'button[aria-label="Copy"]',
-      'button[aria-label="Good response"]',
-      'button[aria-label="Bad response"]',
-      'button[aria-label="Read aloud"]',
-      'button[data-testid="copy-turn-action-button"]',
-      'button[data-testid="good-response-turn-action-button"]',
-      'button[data-testid="bad-response-turn-action-button"]',
-    ];
-
-    for (const selector of actionButtonSelectors) {
-      const actionButton = article.querySelector(selector);
-      if (actionButton) {
-        // Found an action button - get its parent container
-        actionBar = actionButton.parentElement;
-        break;
-      }
+  for (const selector of ACTION_BUTTON_SELECTORS) {
+    const actionButton = article.querySelector(selector);
+    if (actionButton) {
+      return actionButton.parentElement;
     }
   }
+  return null;
+}
+
+// Inject Janus button into an assistant message's action bar
+function injectJanusButton(messageElement) {
+  const article = messageElement.closest("article");
+  const actionBar = findActionBar(article);
 
   if (!actionBar) {
-    // Retry mechanism: action bar might not be rendered yet
-    return;
+    // Action bar not found - this is normal during streaming or before render
+    return false;
   }
 
-  // Double-check we haven't already injected (could happen during retries)
+  // Don't inject if already present
   if (actionBar.querySelector(".janus-analyze-btn")) {
-    return;
+    return true; // Already injected
   }
 
   // Create Janus button
@@ -1226,269 +1224,153 @@ function injectJanusButton(messageElement, retryCount = 0) {
   janusButton.title = "Analyze with Janus";
   janusButton.innerHTML = JANUS_ICON_SVG;
 
-  // Add click handler that extracts message content and logs it
-  janusButton.addEventListener("click", (e) => {
+  // Click handler: trigger privacy analysis
+  janusButton.addEventListener("click", async (e) => {
     e.preventDefault();
     e.stopPropagation();
 
     const messageText = messageElement.textContent?.trim() || "";
-    console.log("Janus: Analyzing message content:");
-    console.log(messageText);
+    console.log("Janus: Analyzing message content:", messageText.substring(0, 100) + "...");
+
+    // Run the privacy violation detection
+    await analyzeAssistantResponse(messageText);
   });
 
-  // Insert the button at the beginning of the action bar
+  // Insert at the beginning of the action bar
   actionBar.insertBefore(janusButton, actionBar.firstChild);
-
-  console.log("Privacy Guard: Janus button injected for message");
-  return janusButton;
+  console.log("Janus: Button injected");
+  return true;
 }
 
-// Inject Janus buttons into all existing assistant messages
-function injectJanusButtonsToExistingMessages() {
-  const assistantMessages = document.querySelectorAll(
-    "[data-message-author-role='assistant']",
-  );
-  console.log("Searching for assistant messages", assistantMessages);
+// Process a finished message: inject button
+function processFinishedMessage(messageElement) {
+  if (!isFinishedAssistantMessage(messageElement)) return;
 
-  assistantMessages.forEach((messageElement) => {
-    injectJanusButton(messageElement);
-  });
+  // Try to inject the button
+  const success = injectJanusButton(messageElement);
 
-  if (assistantMessages.length > 0) {
-    console.log(
-      `Privacy Guard: Injected Janus buttons into ${assistantMessages.length} existing messages`,
-    );
+  if (!success) {
+    // Action bar might not be rendered yet, retry a few times
+    let retries = 0;
+    const retryInterval = setInterval(() => {
+      retries++;
+      if (injectJanusButton(messageElement) || retries >= 10) {
+        clearInterval(retryInterval);
+      }
+    }, 200);
   }
 }
 
-// ==========================================
-// STREAMING ANIMATION DETECTION (EXPERIMENTAL)
-// ==========================================
+// Debounce mechanism for processing messages
+let processTimeout = null;
+const pendingMessages = new Set();
 
-// Track messages that are currently streaming
-const streamingMessages = new Set();
-let streamingObserver = null;
+function scheduleProcessMessage(messageElement) {
+  pendingMessages.add(messageElement);
 
-let auditTimeout = null;
+  if (processTimeout) clearTimeout(processTimeout);
 
-const debounceAudit = (messageNode) => {
-  // 1. Clear any existing pending audit
-  if (auditTimeout) clearTimeout(auditTimeout);
-
-  // 2. Schedule the audit to run after 300ms of "silence"
-  auditTimeout = setTimeout(() => {
-    // 3. Final safety check: ensure the message hasn't
-    // been deleted or started streaming again
-    if (isFinishedAssistantMessage(messageNode)) {
-      const messageId =
-        messageNode.getAttribute("data-testid") ||
-        messageNode.innerText.slice(0, 20);
-
-      // 4. Idempotency: Don't audit the same content twice
-      if (messageNode.dataset.lastAudited === messageId) return;
-
-      messageNode.dataset.lastAudited = messageId;
-      processMessage(messageNode);
-    }
+  processTimeout = setTimeout(() => {
+    pendingMessages.forEach(msg => {
+      if (isFinishedAssistantMessage(msg)) {
+        processFinishedMessage(msg);
+      }
+    });
+    pendingMessages.clear();
   }, 300);
-};
+}
 
 // Set up monitoring for assistant responses
 function setupResponseMonitoring() {
-  // Skip setup if response monitoring is disabled
   if (!ENABLE_RESPONSE_MONITORING) {
     console.log("Privacy Guard: Response monitoring disabled");
     return;
   }
 
-  const targetNode = document.querySelector("main"); // ChatGPT's main chat area
-
-  const isFinishedAssistantMessage = (element) => {
-    const isAssistant =
-      element.getAttribute("data-message-author-role") === "assistant";
-    const isNotStreaming = !element.querySelector(".streaming-animation");
-    return isAssistant && isNotStreaming;
-  };
-
-  const config = {
-    childList: true, // For new messages in current chat
-    subtree: true, // Watch deep into the message structure
-    attributes: true, // For streaming-animation class changes
-    characterData: true, // For chat switches (text content updates)
-    attributeFilter: ["class", "data-message-author-role"],
-  };
-  const callback = (mutationsList) => {
-    for (const mutation of mutationsList) {
-      // Handle Page Load / Chat Switch (Text or Node changes)
-      if (mutation.type === "childList" || mutation.type === "characterData") {
-        const target =
-          mutation.target.nodeType === 3
-            ? mutation.target.parentElement
-            : mutation.target;
-        const messageNode = target.closest(
-          "[data-message-author-role='assistant']",
-        );
-
-        if (messageNode && isFinishedAssistantMessage(messageNode)) {
-          console.log("Janus: Detected completed message introduction.");
-          debounceAudit(messageNode);
-        }
-      }
-
-      // Handle Streaming Completion (Class changes)
-      if (
-        mutation.type === "attributes" &&
-        mutation.attributeName === "class"
-      ) {
-        const parentMessage = mutation.target.closest(
-          "[data-message-author-role='assistant']",
-        );
-        if (parentMessage && isFinishedAssistantMessage(parentMessage)) {
-          console.log("Janus: Detected completed message: finished streaming.");
-          debounceAudit(parentMessage);
-        }
-      }
-    }
-  };
-
-  const observer = new MutationObserver(callback);
-  observer.observe(targetNode, config);
-
-  function processMessage(element) {
-    const text = element.innerText;
-    // Trigger your Janus Privacy Auditor prompt here
-    console.log("Auditing text:", text);
+  const targetNode = document.querySelector("main") || document.body;
+  if (!targetNode) {
+    console.log("Privacy Guard: Could not find main container, retrying...");
+    setTimeout(setupResponseMonitoring, 500);
+    return;
   }
-  // Disconnect existing observer if one exists (prevent duplicates)
+
+  // Disconnect existing observer if present
   if (responseObserver) {
-    console.log("Privacy Guard: Disconnecting existing response observer");
     responseObserver.disconnect();
     responseObserver = null;
   }
 
-  const chatContainer = document.querySelector("main") || document.body;
-
   console.log("Privacy Guard: Setting up response monitoring...");
 
-  responseObserver = new MutationObserver(async (mutations) => {
-    if (processingResponse) return;
+  responseObserver = new MutationObserver((mutationsList) => {
+    for (const mutation of mutationsList) {
+      // Handle new nodes or text changes (page load, chat switch, new messages)
+      if (mutation.type === "childList" || mutation.type === "characterData") {
+        const target = mutation.target.nodeType === Node.TEXT_NODE
+          ? mutation.target.parentElement
+          : mutation.target;
 
-    // Check if URL changed (user navigated to different chat)
-    const newUrl = window.location.href;
-    if (newUrl !== currentChatUrl) {
-      console.log("Privacy Guard: Chat changed, resetting state");
-      currentChatUrl = newUrl;
-      lastProcessedMessageId = null;
-      // Clear streaming tracking for new chat
-      streamingMessages.clear();
-      // Inject Janus buttons into existing messages in the new chat
-      // Use a delay to let the DOM fully load
-      setTimeout(() => {
-        console.log("Privacy Guard: Injecting buttons after chat switch");
-        injectJanusButtonsToExistingMessages();
-      }, 500);
-      return; // Don't process further - this is just a chat switch
-    }
+        if (!target) continue;
 
-    // Check if any mutation is actually adding/changing content (not just navigation)
-    const hasRelevantMutation = mutations.some((mutation) => {
-      // Check for added nodes that are or contain assistant messages
-      if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
-        for (const node of mutation.addedNodes) {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            const el = node;
-            if (
-              el.matches?.("[data-message-author-role='assistant']") ||
-              el.querySelector?.("[data-message-author-role='assistant']")
-            ) {
-              return true;
+        // Check if this mutation affects an assistant message
+        const messageNode = target.closest("[data-message-author-role='assistant']");
+        if (messageNode && isFinishedAssistantMessage(messageNode)) {
+          scheduleProcessMessage(messageNode);
+        }
+
+        // Also check for newly added assistant messages in added nodes
+        if (mutation.type === "childList") {
+          for (const node of mutation.addedNodes) {
+            if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+            // Check if the node itself is an assistant message
+            if (node.matches?.("[data-message-author-role='assistant']")) {
+              if (isFinishedAssistantMessage(node)) {
+                scheduleProcessMessage(node);
+              }
+            }
+
+            // Check for assistant messages within the added node
+            const messages = node.querySelectorAll?.("[data-message-author-role='assistant']");
+            if (messages) {
+              messages.forEach(msg => {
+                if (isFinishedAssistantMessage(msg)) {
+                  scheduleProcessMessage(msg);
+                }
+              });
             }
           }
         }
       }
-      // Check for character data changes (streaming text)
-      if (mutation.type === "characterData") {
-        return true;
+
+      // Handle streaming completion (class attribute changes)
+      if (mutation.type === "attributes" && mutation.attributeName === "class") {
+        const parentMessage = mutation.target.closest("[data-message-author-role='assistant']");
+        if (parentMessage && isFinishedAssistantMessage(parentMessage)) {
+          scheduleProcessMessage(parentMessage);
+        }
       }
-      return false;
-    });
-
-    if (!hasRelevantMutation) {
-      return;
-    }
-
-    processingResponse = true;
-
-    // Find all assistant messages
-    const assistantMessages = document.querySelectorAll(
-      "[data-message-author-role='assistant']",
-    );
-
-    if (assistantMessages.length === 0) {
-      processingResponse = false;
-      return;
-    }
-
-    const latestMessage = assistantMessages[assistantMessages.length - 1];
-    const messageId =
-      latestMessage.getAttribute("data-message-id") ||
-      latestMessage.textContent?.substring(0, 50);
-
-    // Skip if already processed
-    if (messageId === lastProcessedMessageId) {
-      processingResponse = false;
-      return;
-    }
-
-    // Capture initial content to verify it's actually streaming (new response)
-    const initialContent = latestMessage.textContent || "";
-
-    // Wait a bit and check if content is changing (streaming)
-    await new Promise((r) => setTimeout(r, 300));
-    const contentAfterWait = latestMessage.textContent || "";
-
-    // If content hasn't changed and message was already complete, skip (likely a chat switch)
-    if (initialContent === contentAfterWait && initialContent.length > 100) {
-      // Content is static and substantial - likely an old message from chat switch
-      if (ENABLE_VERBOSE_LOGGING) {
-        console.log(
-          "Privacy Guard: Skipping static message (likely chat switch)",
-        );
-      }
-      processingResponse = false;
-      return;
-    }
-
-    // Wait for message to finish streaming
-    if (ENABLE_VERBOSE_LOGGING) {
-      console.log(
-        "Privacy Guard: New assistant message detected, waiting for completion...",
-      );
-    }
-    await waitForMessageComplete(latestMessage);
-
-    lastProcessedMessageId = messageId;
-
-    try {
-      // Phase 1: Instead of auto-analyzing, inject the Janus button
-      // The user can click the button to manually trigger analysis
-      injectJanusButton(latestMessage);
-
-      // DISABLED: Automatic privacy analysis
-      // const responseText = latestMessage.textContent?.trim() || "";
-      // if (responseText) {
-      //   await analyzeAssistantResponse(responseText);
-      // }
-    } finally {
-      processingResponse = false;
     }
   });
 
-  responseObserver.observe(chatContainer, {
+  responseObserver.observe(targetNode, {
     childList: true,
     subtree: true,
+    attributes: true,
     characterData: true,
+    attributeFilter: ["class"],
   });
+
+  // Also process any existing messages on the page
+  setTimeout(() => {
+    const existingMessages = document.querySelectorAll("[data-message-author-role='assistant']");
+    console.log(`Privacy Guard: Found ${existingMessages.length} existing messages`);
+    existingMessages.forEach(msg => {
+      if (isFinishedAssistantMessage(msg)) {
+        processFinishedMessage(msg);
+      }
+    });
+  }, 500);
 
   console.log("Privacy Guard: Response monitoring initialized");
 }
@@ -1914,15 +1796,10 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     monitorChatGPTInput();
     setupResponseMonitoring();
-    // Inject Janus buttons into existing messages after a short delay
-    // (to ensure the DOM is fully loaded)
-    setTimeout(injectJanusButtonsToExistingMessages, 1000);
   });
 } else {
   monitorChatGPTInput();
   setupResponseMonitoring();
-  // Inject Janus buttons into existing messages after a short delay
-  setTimeout(injectJanusButtonsToExistingMessages, 1000);
 }
 
 console.log("Privacy Guard: Content script loaded for ChatGPT");
