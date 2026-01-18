@@ -128,6 +128,21 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         });
       });
     return true;
+  } else if (request.type === "generateFakeIdentity") {
+    console.log("Background: Generating fake identity");
+    generateFakeIdentity(request.characteristics)
+      .then((result) => {
+        console.log("Background: Fake identity generation complete, sending response");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Fake identity generation error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      });
+    return true;
   }
 });
 
@@ -266,14 +281,23 @@ async function detectPrivacyViolationsInResponse(
       .map((c: any) => `- ${c.name}: ${c.value}`)
       .join("\n");
 
+    // Include fake characteristics as allowed information
+    const fakeCharacteristicsList = (identity.fakeCharacteristics || [])
+      .map((c: any) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+
     console.log("responseText", responseText);
     console.log("identity", identity);
+
+    const allowedInfo = fakeCharacteristicsList
+      ? `${characteristicsList}\n\nFAKE/OBFUSCATED INFORMATION (also allowed):\n${fakeCharacteristicsList}`
+      : characteristicsList;
 
     const prompt = `You are a privacy auditor. Analyze the AI assistant's response to detect if it reveals that it KNOWS information about the user that goes BEYOND their allowed privacy profile.
 
 PRIVACY PROFILE: "${identity.name}"
 Information the user has chosen to share:
-${characteristicsList}
+${allowedInfo}
 
 AI RESPONSE TO ANALYZE:
 ${responseText}
@@ -282,6 +306,8 @@ Your task: Identify any statements where the AI demonstrates knowledge of user i
 1. MORE SPECIFIC than what's in the profile (e.g., profile says "Canada" but AI mentions "Toronto")
 2. NOT COVERED by any characteristic in the profile (e.g., AI mentions user's email but no email in profile)
 3. INFERRED beyond what was explicitly shared (e.g., AI assumes user's age from context)
+
+IMPORTANT: If the AI mentions information that matches the FAKE/OBFUSCATED information, DO NOT flag it as a violation. This is expected and allowed.
 
 Return a JSON array of violations. Each item must have:
 - "knownInfo": what the AI claims to know (exact quote or paraphrase)
@@ -699,6 +725,84 @@ Return ONLY the summary text, nothing else. No JSON, no quotes, just the summary
     return { summary };
   } catch (error) {
     console.error("Background: Summary generation error:", error);
+    throw error;
+  }
+}
+
+async function generateFakeIdentity(characteristics: any[]) {
+  try {
+    console.log("Background: Generating fake identity from characteristics");
+
+    if (!characteristics || characteristics.length === 0) {
+      return { fakeCharacteristics: [] };
+    }
+
+    const characteristicsList = characteristics
+      .map((c) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+
+    const systemPrompt = `You are a privacy protection assistant that generates fake identities for data obfuscation.
+
+Your task: Given a list of real characteristics, generate plausible fake values for each characteristic. The fake values should:
+- Be realistic and believable
+- Match the type/format of the original (e.g., if age is "25", generate another age like "32")
+- Be completely different from the original values
+- Maintain consistency across related characteristics
+
+Return a JSON object with one field:
+- "fakeCharacteristics": An array of characteristics with the same names but fake values
+
+Each fake characteristic should have:
+- "name": The same name as the original characteristic
+- "value": A plausible fake value
+
+Guidelines:
+- For names: Generate completely different names (different gender is OK)
+- For ages: Generate different ages within a reasonable range (+/- 10 years)
+- For locations: Generate different cities/countries
+- For occupations: Generate different but plausible occupations
+- For interests/hobbies: Generate different but realistic interests
+- Keep the fake identity internally consistent (e.g., if location is France, use French-sounding names)
+
+Return ONLY the JSON object, nothing else.
+
+Example:
+Real: Name: John, Age: 25, Location: Toronto
+Fake: Name: Emma, Age: 32, Location: Vancouver`;
+
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `Real Characteristics:\n${characteristicsList}`,
+        },
+      ],
+      temperature: 0.8,
+      max_tokens: 1500,
+    });
+
+    const content = completion.choices[0].message.content?.trim() || "{}";
+    console.log("Background: Fake identity generation response received");
+
+    const jsonContent = content.replace(/```json\n?|\n?```/g, "").trim();
+    const result = JSON.parse(jsonContent);
+
+    // Ensure fake characteristics have IDs
+    if (result.fakeCharacteristics) {
+      result.fakeCharacteristics = result.fakeCharacteristics.map(
+        (char: any, idx: number) => ({
+          id: `fake-char-${Date.now()}-${idx}`,
+          name: char.name,
+          value: char.value,
+        }),
+      );
+    }
+
+    return result;
+  } catch (error) {
+    console.error("Background: Fake identity generation error:", error);
     throw error;
   }
 }
