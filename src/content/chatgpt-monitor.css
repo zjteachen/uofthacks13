@@ -602,3 +602,22 @@
   height: 24px;
   flex-shrink: 0;
 }
+
+/* Analyzing state - spinning animation */
+.janus-analyze-btn.janus-analyzing {
+  cursor: wait;
+  pointer-events: none;
+}
+
+.janus-analyze-btn.janus-analyzing svg {
+  animation: janus-spin 1s ease-in-out infinite;
+}
+
+@keyframes janus-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}

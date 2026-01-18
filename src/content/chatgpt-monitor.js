@@ -117,7 +117,11 @@ function extractChatHistory() {
 }
 
 // Show toast notification
-function showToast(message) {
+// Options: { persistent: boolean, color: string }
+// Returns a dismiss function for persistent toasts
+function showToast(message, options = {}) {
+  const { persistent = false, color = "#10a37f" } = options;
+
   const toast = document.createElement("div");
   toast.className = "privacy-toast";
   toast.textContent = message;
@@ -127,7 +131,7 @@ function showToast(message) {
     position: "fixed",
     bottom: "20px",
     right: "20px",
-    backgroundColor: "#10a37f",
+    backgroundColor: color,
     color: "white",
     padding: "12px 20px",
     borderRadius: "8px",
@@ -171,11 +175,18 @@ function showToast(message) {
 
   document.body.appendChild(toast);
 
-  // Remove after 3 seconds with animation
-  setTimeout(() => {
+  // Dismiss function
+  const dismiss = () => {
     toast.style.animation = "slideOut 0.3s ease-in";
     setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  };
+
+  if (!persistent) {
+    // Remove after 3 seconds with animation
+    setTimeout(dismiss, 3000);
+  }
+
+  return dismiss;
 }
 
 // Detect personal information using AI (via background service worker)
@@ -1229,11 +1240,26 @@ function injectJanusButton(messageElement) {
     e.preventDefault();
     e.stopPropagation();
 
+    // Prevent double-clicks while analyzing
+    if (janusButton.classList.contains("janus-analyzing")) {
+      return;
+    }
+
     const messageText = messageElement.textContent?.trim() || "";
     console.log("Janus: Analyzing message content:", messageText.substring(0, 100) + "...");
 
-    // Run the privacy violation detection
-    await analyzeAssistantResponse(messageText);
+    // Start loading state: spin icon and show toast
+    janusButton.classList.add("janus-analyzing");
+    const dismissToast = showToast("Analyzing with Janus...", { persistent: true, color: "#8B5CF6" });
+
+    try {
+      // Run the privacy violation detection
+      await analyzeAssistantResponse(messageText);
+    } finally {
+      // Stop loading state
+      janusButton.classList.remove("janus-analyzing");
+      dismissToast();
+    }
   });
 
   // Insert at the beginning of the action bar
