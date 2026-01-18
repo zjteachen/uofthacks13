@@ -19,7 +19,10 @@ function IdentityMenu({
   return (
     <div className="identity-menu">
       <div className="menu-header">
-        <h2>Identities</h2>
+        <div className="menu-title">
+          <img src="/icons/icon.svg" alt="Janus" className="menu-icon" />
+          <h2>Janus</h2>
+        </div>
         <button className="add-btn" onClick={onAddIdentity} title="Add new identity">
           +
         </button>

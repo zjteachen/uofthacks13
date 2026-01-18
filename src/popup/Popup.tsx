@@ -107,18 +107,29 @@ function Popup() {
 
   if (loading) {
     return (
-      <div className="container">
-        <p>Loading...</p>
+      <div className="popup-container">
+        <div className="popup-header">
+          <img src="/icons/icon.svg" alt="Janus" className="header-icon" />
+          <h1>Janus</h1>
+        </div>
+        <div className="loading-container">
+          <div className="loading-spinner"></div>
+          <p>Loading identities...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="container">
-      <h1>Privacy Guard</h1>
-
-      <div className="current-identity-section">
-        <h3>Current Identity</h3>
+    <div className="popup-container">
+      <div className="popup-header">
+        <img src="/icons/icon.svg" alt="Janus" className="header-icon" />
+        <h1>Janus</h1>
+      </div>
+      
+      <div className="popup-content">
+        <div className="current-identity-section">
+          <h3 className="section-label">Current Identity</h3>
         {currentIdentity ? (
           <div className="identity-card">
             {currentIdentity.profilePicture && (
@@ -141,7 +152,7 @@ function Popup() {
 
       {identities.length > 0 ? (
         <div className="switch-section">
-          <h3>Switch Identity</h3>
+          <h3 className="section-label">Switch Identity</h3>
           <div className="switch-controls">
             <select
               value={selectedDropdownId}
@@ -170,8 +181,9 @@ function Popup() {
       )}
 
       <button onClick={handleOpenOptions} className="settings-btn">
-        Open Settings
+        ⚙️ Open Settings
       </button>
+      </div>
     </div>
   );
 }
