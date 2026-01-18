@@ -43,7 +43,10 @@ try {
         "→",
         request.newIdentity?.name,
       );
-      handleIdentitySwitchWithPollution(request.previousIdentity, request.newIdentity);
+      handleIdentitySwitchWithPollution(
+        request.previousIdentity,
+        request.newIdentity,
+      );
       sendResponse({ success: true });
     }
   });
@@ -65,19 +68,22 @@ async function getSelectedIdentity() {
         resolve(null);
         return;
       }
-      
+
       chrome.storage.sync.get(["identities", "selectedId"], (result) => {
         if (!isExtensionValid()) {
           resolve(null);
           return;
         }
-        
+
         if (chrome.runtime.lastError) {
-          console.log("Privacy Guard: Storage error:", chrome.runtime.lastError.message);
+          console.log(
+            "Privacy Guard: Storage error:",
+            chrome.runtime.lastError.message,
+          );
           resolve(null);
           return;
         }
-        
+
         if (result.selectedId && result.identities) {
           const identity = result.identities.find(
             (i) => i.id === result.selectedId,
@@ -118,7 +124,7 @@ function showToast(message) {
   const toast = document.createElement("div");
   toast.className = "privacy-toast";
   toast.textContent = message;
-  
+
   // Add inline styles
   Object.assign(toast.style, {
     position: "fixed",
@@ -133,9 +139,10 @@ function showToast(message) {
     boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
     zIndex: "10001",
     animation: "slideIn 0.3s ease-out",
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    fontFamily:
+      "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
   });
-  
+
   // Add animation keyframes if not already added
   if (!document.getElementById("privacy-toast-styles")) {
     const style = document.createElement("style");
@@ -164,9 +171,9 @@ function showToast(message) {
     `;
     document.head.appendChild(style);
   }
-  
+
   document.body.appendChild(toast);
-  
+
   // Remove after 3 seconds with animation
   setTimeout(() => {
     toast.style.animation = "slideOut 0.3s ease-in";
@@ -207,7 +214,7 @@ async function rewriteMessage(originalText, itemsToRemove, identity = null) {
       reject(new Error("Extension context invalidated"));
       return;
     }
-    
+
     chrome.runtime.sendMessage(
       {
         type: "rewriteMessage",
@@ -220,7 +227,7 @@ async function rewriteMessage(originalText, itemsToRemove, identity = null) {
           reject(new Error("Extension context invalidated"));
           return;
         }
-        
+
         if (response && response.success) {
           resolve(response.data);
         } else {
@@ -237,17 +244,19 @@ async function checkAndAugmentContext(text, identity) {
   return new Promise((resolve) => {
     // Timeout after 10 seconds to prevent hanging
     const timeout = setTimeout(() => {
-      console.log("Privacy Guard: Context check timed out, proceeding without context");
+      console.log(
+        "Privacy Guard: Context check timed out, proceeding without context",
+      );
       resolve({ needsContext: false, augmentedPrompt: text });
     }, 10000);
-    
+
     try {
       if (!isExtensionValid()) {
         clearTimeout(timeout);
         resolve({ needsContext: false, augmentedPrompt: text });
         return;
       }
-      
+
       chrome.runtime.sendMessage(
         {
           type: "checkContextNeeded",
@@ -256,19 +265,27 @@ async function checkAndAugmentContext(text, identity) {
         },
         (response) => {
           clearTimeout(timeout);
-          
+
           // Check for runtime errors (extension reloaded, etc.)
           if (!isExtensionValid() || chrome.runtime.lastError) {
-            console.log("Privacy Guard: Runtime error in context check:", chrome.runtime.lastError?.message);
+            console.log(
+              "Privacy Guard: Runtime error in context check:",
+              chrome.runtime.lastError?.message,
+            );
             resolve({ needsContext: false, augmentedPrompt: text });
             return;
           }
-          
+
           if (response && response.success) {
-            console.log("Privacy Guard: Context check complete:", response.data?.needsContext);
+            console.log(
+              "Privacy Guard: Context check complete:",
+              response.data?.needsContext,
+            );
             resolve(response.data);
           } else {
-            console.log("Privacy Guard: Context check returned no data, proceeding without context");
+            console.log(
+              "Privacy Guard: Context check returned no data, proceeding without context",
+            );
             resolve({ needsContext: false, augmentedPrompt: text });
           }
         },
@@ -466,9 +483,12 @@ function hashString(str) {
 async function interceptSubmission(textarea, shouldAutoSubmit = false) {
   // If extension context is invalid, just let the message through
   if (!isExtensionValid()) {
-    return { proceed: true, text: textarea.value || textarea.textContent || "" };
+    return {
+      proceed: true,
+      text: textarea.value || textarea.textContent || "",
+    };
   }
-  
+
   const text =
     textarea.value || textarea.textContent || textarea.innerText || "";
   const textHash = hashString(text);
@@ -486,9 +506,10 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
       isProgrammaticSubmit = true;
       setTimeout(() => {
         // Find button fresh each time to avoid stale references
-        const sendBtn = document.querySelector('button[aria-label="Send prompt"]') ||
-                        document.querySelector('button.send-button') ||
-                        document.querySelector('button[data-testid="send-button"]');
+        const sendBtn =
+          document.querySelector('button[aria-label="Send prompt"]') ||
+          document.querySelector("button.send-button") ||
+          document.querySelector('button[data-testid="send-button"]');
         if (sendBtn) {
           sendBtn.click();
         } else if (currentForm) {
@@ -503,17 +524,27 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
   // Check for context augmentation (runs even if input monitoring is disabled)
   if (ENABLE_CONTEXT_AUGMENTATION && !contextAugmentedMessages.has(textHash)) {
     const identity = await getSelectedIdentity();
-    
-    if (identity && identity.characteristics && identity.characteristics.length > 0) {
+
+    if (
+      identity &&
+      identity.characteristics &&
+      identity.characteristics.length > 0
+    ) {
       console.log("Privacy Guard: Checking if prompt needs context...");
-      
+
       const contextResult = await checkAndAugmentContext(text, identity);
-      
-      if (contextResult.needsContext && contextResult.augmentedPrompt !== text) {
+
+      if (
+        contextResult.needsContext &&
+        contextResult.augmentedPrompt !== text
+      ) {
         console.log("Privacy Guard: Adding context to prompt");
         console.log("Privacy Guard: Reason:", contextResult.reason);
-        console.log("Privacy Guard: Added context:", contextResult.addedContext);
-        
+        console.log(
+          "Privacy Guard: Added context:",
+          contextResult.addedContext,
+        );
+
         // Update textarea with augmented text
         if (textarea.value !== undefined) {
           textarea.value = contextResult.augmentedPrompt;
@@ -541,15 +572,16 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
   if (!ENABLE_INPUT_MONITORING) {
     // Mark as approved so we don't check again when we click submit
     approvedMessages.add(textHash);
-    
+
     // Auto-submit since we already prevented the default event
     if (shouldAutoSubmit) {
       isProgrammaticSubmit = true;
       setTimeout(() => {
         // Find button fresh each time
-        const sendBtn = document.querySelector('button[aria-label="Send prompt"]') ||
-                        document.querySelector('button.send-button') ||
-                        document.querySelector('button[data-testid="send-button"]');
+        const sendBtn =
+          document.querySelector('button[aria-label="Send prompt"]') ||
+          document.querySelector("button.send-button") ||
+          document.querySelector('button[data-testid="send-button"]');
         if (sendBtn) {
           sendBtn.click();
         } else if (currentForm) {
@@ -1011,44 +1043,46 @@ async function generatePollutionMessage(toDeny, toPollute) {
 async function updateFakeIdentityFromPollution(identityId, toPollute) {
   try {
     console.log("Privacy Guard: Updating fake identity from pollution data");
-    
+
     // Get current identities
     const result = await chrome.storage.sync.get(["identities"]);
     const identities = result.identities || [];
-    
+
     // Find the identity
-    const identityIndex = identities.findIndex(i => i.id === identityId);
+    const identityIndex = identities.findIndex((i) => i.id === identityId);
     if (identityIndex === -1) {
       console.error("Privacy Guard: Identity not found");
       return;
     }
-    
+
     const identity = identities[identityIndex];
     const existingFakes = identity.fakeCharacteristics || [];
-    
+
     // Create map of existing fake characteristics
-    const fakeMap = new Map(existingFakes.map(c => [c.name.toLowerCase(), c]));
-    
+    const fakeMap = new Map(
+      existingFakes.map((c) => [c.name.toLowerCase(), c]),
+    );
+
     // Extract characteristics from polluted information
     toPollute.forEach((violation, idx) => {
       const charName = violation.category || "Info";
       const charValue = violation.knownInfo || "";
-      
+
       // Add or update fake characteristic
       const key = charName.toLowerCase();
       if (!fakeMap.has(key)) {
         fakeMap.set(key, {
           id: `fake-pollute-${Date.now()}-${idx}`,
           name: charName.charAt(0).toUpperCase() + charName.slice(1),
-          value: charValue
+          value: charValue,
         });
       }
     });
-    
+
     // Update identity with new fake characteristics
     identity.fakeCharacteristics = Array.from(fakeMap.values());
     identities[identityIndex] = identity;
-    
+
     // Save back to storage
     await chrome.storage.sync.set({ identities });
     console.log("Privacy Guard: Fake identity updated successfully");
@@ -1130,6 +1164,135 @@ async function analyzeAssistantResponse(responseText) {
   }
 }
 
+// ==========================================
+// JANUS BUTTON INJECTION
+// ==========================================
+
+// Inline SVG for the Janus icon (purple two-faced logo)
+const JANUS_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-5 -10 110 135" width="24" height="24">
+  <path fill="currentColor" d="m89.809 42.785c-4.7109 0.82812-10.992 1.2812-18.164 0.015625-5.2344-0.92188-9.6992-2.543-13.348-4.2773-0.61328 4.4883-1.9062 9.0234-4.1133 13.371 1.418 0.82812 3 1.4375 4.7227 1.7422 2.0586 0.36328 4.082 0.26953 5.9688-0.20703 0.85156-0.21484 1.5078 0.82812 0.9375 1.4922-1.8164 2.1211-4.6797 3.25-7.6172 2.7305-2.2305-0.39453-4.0938-1.6641-5.2891-3.3984-0.61719 1.0273-1.2891 2.0391-2.0234 3.0352-1.6367 2.2148-3.5273 4.2539-5.6406 6.0938 0.60937 6.4219 2.5508 13.035 6.8867 18.902 1.5977 2.1602 3.8867 4.7227 7.1523 7.168 2.2969 1.7188 5.2695 2.2422 8.0156 1.4141 3.9062-1.1797 6.9336-2.8047 9.1719-4.2891 15.133-10.031 18.051-29.434 18.523-39.215 0.13672-2.8594-2.3867-5.0703-5.1875-4.5742zm-14.18 36.324c-2.6289-2.0352-5.7891-3.4727-9.3125-4.0938-3.5273-0.62109-6.9883-0.35156-10.152 0.66016-0.85937 0.27344-1.5508-0.67578-1.0469-1.4258 2.6055-3.9062 7.3594-6.1016 12.258-5.2383 4.9023 0.86328 8.6172 4.5547 9.7266 9.1133 0.21484 0.87891-0.75781 1.5312-1.4727 0.98047zm11.184-20.488c-1.8164 2.1211-4.6797 3.25-7.6172 2.7305-2.9414-0.51953-5.2422-2.5547-6.2227-5.1719-0.30859-0.82031 0.66797-1.5742 1.3945-1.082 1.6094 1.0938 3.4805 1.875 5.5391 2.2344 2.0586 0.36328 4.082 0.26953 5.9688-0.20703 0.85156-0.21484 1.5078 0.82812 0.9375 1.4922z"/>
+  <path fill="currentColor" d="m51.859 11.875c-0.84766-2.7344-3.9766-3.9492-6.4414-2.5273-4.1445 2.3906-9.8906 4.9609-17.062 6.2266s-13.453 0.81641-18.164-0.015625c-2.8008-0.49219-5.3242 1.7188-5.1875 4.5742 0.47266 9.7812 3.3906 29.184 18.523 39.215 2.2383 1.4844 5.2656 3.1094 9.1758 4.2891 2.7422 0.82812 5.7188 0.30469 8.0156-1.4141 3.2695-2.4453 5.5586-5.0078 7.1523-7.168 10.789-14.602 6.8945-33.828 3.9922-43.184zm-36.824 23.188c-0.72656 0.49219-1.6992-0.26172-1.3945-1.082 0.98047-2.6133 3.2852-4.6523 6.2227-5.1719 2.9414-0.51953 5.8008 0.60938 7.6172 2.7305 0.57031 0.66406-0.089844 1.707-0.9375 1.4922-1.8867-0.47656-3.9141-0.57031-5.9688-0.20703-2.0586 0.36328-3.9297 1.1406-5.5391 2.2344zm29.797 7.6484c-1.1133 4.5625-4.8281 8.25-9.7266 9.1133-4.9023 0.86328-9.6523-1.332-12.258-5.2383-0.5-0.75 0.1875-1.6992 1.0469-1.4258 3.1641 1.0117 6.6289 1.2852 10.152 0.66016 3.5273-0.62109 6.6875-2.0625 9.3125-4.0938 0.71484-0.55078 1.6875 0.10547 1.4727 0.98047zm2.707-13.379c-1.8867-0.47656-3.9141-0.57031-5.9688-0.20703-2.0586 0.36328-3.9297 1.1406-5.5391 2.2344-0.72656 0.49219-1.6992-0.26172-1.3945-1.082 0.98047-2.6133 3.2852-4.6523 6.2227-5.1719 2.9414-0.51953 5.8008 0.60938 7.6172 2.7305 0.57031 0.66406-0.089843 1.707-0.9375 1.4922z"/>
+</svg>`;
+
+// Track which messages already have Janus buttons injected
+const injectedMessageIds = new Set();
+
+// Inject Janus button into an assistant message's action bar
+function injectJanusButton(messageElement, retryCount = 0) {
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY = 300;
+
+  // Find the action button container by looking for specific action buttons
+  // ChatGPT action bars contain buttons with specific aria-labels like:
+  // "Copy", "Good response", "Bad response", "Read aloud"
+  let actionBar = null;
+  const article = messageElement.closest("article");
+
+  if (article) {
+    // Method 1: Find buttons with known aria-labels and get their container
+    const actionButtonSelectors = [
+      'button[aria-label="Copy"]',
+      'button[aria-label="Good response"]',
+      'button[aria-label="Bad response"]',
+      'button[aria-label="Read aloud"]',
+      'button[data-testid="copy-turn-action-button"]',
+      'button[data-testid="good-response-turn-action-button"]',
+      'button[data-testid="bad-response-turn-action-button"]',
+    ];
+
+    for (const selector of actionButtonSelectors) {
+      const actionButton = article.querySelector(selector);
+      if (actionButton) {
+        // Found an action button - get its parent container
+        actionBar = actionButton.parentElement;
+        break;
+      }
+    }
+  }
+
+  if (!actionBar) {
+    // Retry mechanism: action bar might not be rendered yet
+    return;
+  }
+
+  // Double-check we haven't already injected (could happen during retries)
+  if (actionBar.querySelector(".janus-analyze-btn")) {
+    return;
+  }
+
+  // Create Janus button
+  const janusButton = document.createElement("button");
+  janusButton.className = "janus-analyze-btn";
+  janusButton.title = "Analyze with Janus";
+  janusButton.innerHTML = JANUS_ICON_SVG;
+
+  // Add click handler that extracts message content and logs it
+  janusButton.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const messageText = messageElement.textContent?.trim() || "";
+    console.log("Janus: Analyzing message content:");
+    console.log(messageText);
+  });
+
+  // Insert the button at the beginning of the action bar
+  actionBar.insertBefore(janusButton, actionBar.firstChild);
+
+  console.log("Privacy Guard: Janus button injected for message");
+  return janusButton;
+}
+
+// Inject Janus buttons into all existing assistant messages
+function injectJanusButtonsToExistingMessages() {
+  const assistantMessages = document.querySelectorAll(
+    "[data-message-author-role='assistant']",
+  );
+  console.log("Searching for assistant messages", assistantMessages);
+
+  assistantMessages.forEach((messageElement) => {
+    injectJanusButton(messageElement);
+  });
+
+  if (assistantMessages.length > 0) {
+    console.log(
+      `Privacy Guard: Injected Janus buttons into ${assistantMessages.length} existing messages`,
+    );
+  }
+}
+
+// ==========================================
+// STREAMING ANIMATION DETECTION (EXPERIMENTAL)
+// ==========================================
+
+// Track messages that are currently streaming
+const streamingMessages = new Set();
+let streamingObserver = null;
+
+let auditTimeout = null;
+
+const debounceAudit = (messageNode) => {
+  // 1. Clear any existing pending audit
+  if (auditTimeout) clearTimeout(auditTimeout);
+
+  // 2. Schedule the audit to run after 300ms of "silence"
+  auditTimeout = setTimeout(() => {
+    // 3. Final safety check: ensure the message hasn't
+    // been deleted or started streaming again
+    if (isFinishedAssistantMessage(messageNode)) {
+      const messageId =
+        messageNode.getAttribute("data-testid") ||
+        messageNode.innerText.slice(0, 20);
+
+      // 4. Idempotency: Don't audit the same content twice
+      if (messageNode.dataset.lastAudited === messageId) return;
+
+      messageNode.dataset.lastAudited = messageId;
+      processMessage(messageNode);
+    }
+  }, 300);
+};
+
 // Set up monitoring for assistant responses
 function setupResponseMonitoring() {
   // Skip setup if response monitoring is disabled
@@ -1138,6 +1301,64 @@ function setupResponseMonitoring() {
     return;
   }
 
+  const targetNode = document.querySelector("main"); // ChatGPT's main chat area
+
+  const isFinishedAssistantMessage = (element) => {
+    const isAssistant =
+      element.getAttribute("data-message-author-role") === "assistant";
+    const isNotStreaming = !element.querySelector(".streaming-animation");
+    return isAssistant && isNotStreaming;
+  };
+
+  const config = {
+    childList: true, // For new messages in current chat
+    subtree: true, // Watch deep into the message structure
+    attributes: true, // For streaming-animation class changes
+    characterData: true, // For chat switches (text content updates)
+    attributeFilter: ["class", "data-message-author-role"],
+  };
+  const callback = (mutationsList) => {
+    for (const mutation of mutationsList) {
+      // Handle Page Load / Chat Switch (Text or Node changes)
+      if (mutation.type === "childList" || mutation.type === "characterData") {
+        const target =
+          mutation.target.nodeType === 3
+            ? mutation.target.parentElement
+            : mutation.target;
+        const messageNode = target.closest(
+          "[data-message-author-role='assistant']",
+        );
+
+        if (messageNode && isFinishedAssistantMessage(messageNode)) {
+          console.log("Janus: Detected completed message introduction.");
+          debounceAudit(messageNode);
+        }
+      }
+
+      // Handle Streaming Completion (Class changes)
+      if (
+        mutation.type === "attributes" &&
+        mutation.attributeName === "class"
+      ) {
+        const parentMessage = mutation.target.closest(
+          "[data-message-author-role='assistant']",
+        );
+        if (parentMessage && isFinishedAssistantMessage(parentMessage)) {
+          console.log("Janus: Detected completed message: finished streaming.");
+          debounceAudit(parentMessage);
+        }
+      }
+    }
+  };
+
+  const observer = new MutationObserver(callback);
+  observer.observe(targetNode, config);
+
+  function processMessage(element) {
+    const text = element.innerText;
+    // Trigger your Janus Privacy Auditor prompt here
+    console.log("Auditing text:", text);
+  }
   // Disconnect existing observer if one exists (prevent duplicates)
   if (responseObserver) {
     console.log("Privacy Guard: Disconnecting existing response observer");
@@ -1158,7 +1379,15 @@ function setupResponseMonitoring() {
       console.log("Privacy Guard: Chat changed, resetting state");
       currentChatUrl = newUrl;
       lastProcessedMessageId = null;
-      return; // Don't process - this is just a chat switch
+      // Clear streaming tracking for new chat
+      streamingMessages.clear();
+      // Inject Janus buttons into existing messages in the new chat
+      // Use a delay to let the DOM fully load
+      setTimeout(() => {
+        console.log("Privacy Guard: Injecting buttons after chat switch");
+        injectJanusButtonsToExistingMessages();
+      }, 500);
+      return; // Don't process further - this is just a chat switch
     }
 
     // Check if any mutation is actually adding/changing content (not just navigation)
@@ -1241,10 +1470,15 @@ function setupResponseMonitoring() {
     lastProcessedMessageId = messageId;
 
     try {
-      const responseText = latestMessage.textContent?.trim() || "";
-      if (responseText) {
-        await analyzeAssistantResponse(responseText);
-      }
+      // Phase 1: Instead of auto-analyzing, inject the Janus button
+      // The user can click the button to manually trigger analysis
+      injectJanusButton(latestMessage);
+
+      // DISABLED: Automatic privacy analysis
+      // const responseText = latestMessage.textContent?.trim() || "";
+      // if (responseText) {
+      //   await analyzeAssistantResponse(responseText);
+      // }
     } finally {
       processingResponse = false;
     }
@@ -1359,12 +1593,16 @@ function monitorChatGPTInput() {
     // Method 3: Monitor the send button
     const findSendButton = () => {
       // ChatGPT: Look for button with exact aria-label="Send prompt" first
-      const chatGptSendBtn = document.querySelector('button[aria-label="Send prompt"]');
+      const chatGptSendBtn = document.querySelector(
+        'button[aria-label="Send prompt"]',
+      );
       if (chatGptSendBtn && chatGptSendBtn.offsetParent !== null) {
-        console.log("Privacy Guard: Found ChatGPT send button with aria-label='Send prompt'");
+        console.log(
+          "Privacy Guard: Found ChatGPT send button with aria-label='Send prompt'",
+        );
         return chatGptSendBtn;
       }
-      
+
       // Gemini uses .send-button class
       const geminiSendBtn = document.querySelector("button.send-button");
       if (geminiSendBtn && geminiSendBtn.offsetParent !== null) {
@@ -1375,9 +1613,13 @@ function monitorChatGPTInput() {
       }
 
       // Fallback: Look for data-testid="send-button"
-      const testIdBtn = document.querySelector('button[data-testid="send-button"]');
+      const testIdBtn = document.querySelector(
+        'button[data-testid="send-button"]',
+      );
       if (testIdBtn && testIdBtn.offsetParent !== null) {
-        console.log("Privacy Guard: Found send button with data-testid='send-button'");
+        console.log(
+          "Privacy Guard: Found send button with data-testid='send-button'",
+        );
         return testIdBtn;
       }
 
@@ -1396,7 +1638,7 @@ function monitorChatGPTInput() {
             console.log("Privacy Guard: Programmatic submit, allowing through");
             return;
           }
-          
+
           console.log("Privacy Guard: Send button clicked");
 
           // Check if message is already approved (from rewrite)
@@ -1449,7 +1691,10 @@ function monitorChatGPTInput() {
 // ==========================================
 
 // Handle identity switch with pollution message generation
-async function handleIdentitySwitchWithPollution(previousIdentity, newIdentity) {
+async function handleIdentitySwitchWithPollution(
+  previousIdentity,
+  newIdentity,
+) {
   // If no previous identity, nothing to pollute - just log and return
   if (!previousIdentity) {
     console.log("Privacy Guard: No previous identity, nothing to pollute");
@@ -1525,7 +1770,10 @@ function showSwitchPollutionModal(previousIdentity, newIdentity) {
     },
     (response) => {
       if (!response || !response.success) {
-        console.error("Privacy Guard: Failed to generate pollution message:", response?.error);
+        console.error(
+          "Privacy Guard: Failed to generate pollution message:",
+          response?.error,
+        );
         // Show error state
         modal.querySelector(".loading-state").innerHTML = `
           <p style="color: #ff6b6b;">Failed to generate pollution message. Please try again.</p>
@@ -1541,14 +1789,17 @@ function showSwitchPollutionModal(previousIdentity, newIdentity) {
       if (!hasPollution) {
         // No overlaps or denials - show no-pollution state and just close
         modal.querySelector(".no-pollution-state").style.display = "block";
-        modal.querySelector("#switch-inject-only-btn").style.display = "inline-block";
+        modal.querySelector("#switch-inject-only-btn").style.display =
+          "inline-block";
         modal.querySelector("#switch-inject-only-btn").textContent = "Close";
 
         // Set up close button - just closes modal, no identity injection
-        modal.querySelector("#switch-inject-only-btn").addEventListener("click", () => {
-          console.log("Privacy Guard: No pollution needed, closing modal");
-          modal.remove();
-        });
+        modal
+          .querySelector("#switch-inject-only-btn")
+          .addEventListener("click", () => {
+            console.log("Privacy Guard: No pollution needed, closing modal");
+            modal.remove();
+          });
         return;
       }
 
@@ -1565,14 +1816,18 @@ function showSwitchPollutionModal(previousIdentity, newIdentity) {
           <div class="comparison-section">
             <h4>Overlapping Characteristics (will be contradicted):</h4>
             <div class="comparison-list">
-              ${overlaps.map(o => `
+              ${overlaps
+                .map(
+                  (o) => `
                 <div class="comparison-item overlap-item">
                   <span class="char-name">${o.name}:</span>
                   <span class="char-old">${o.oldValue}</span>
                   <span class="char-arrow">→</span>
                   <span class="char-new">${o.newValue}</span>
                 </div>
-              `).join("")}
+              `,
+                )
+                .join("")}
             </div>
           </div>
         `;
@@ -1583,20 +1838,25 @@ function showSwitchPollutionModal(previousIdentity, newIdentity) {
           <div class="comparison-section">
             <h4>Characteristics to Deny (no replacement in new identity):</h4>
             <div class="comparison-list">
-              ${denialsOnly.map(d => `
+              ${denialsOnly
+                .map(
+                  (d) => `
                 <div class="comparison-item denial-item">
                   <span class="char-name">${d.name}:</span>
                   <span class="char-old">${d.value}</span>
                   <span class="char-arrow">→</span>
                   <span class="char-denied">(denied)</span>
                 </div>
-              `).join("")}
+              `,
+                )
+                .join("")}
             </div>
           </div>
         `;
       }
 
-      modal.querySelector(".characteristics-comparison").innerHTML = comparisonHtml;
+      modal.querySelector(".characteristics-comparison").innerHTML =
+        comparisonHtml;
 
       // Set the generated message in the textarea
       const textarea = modal.querySelector("#switch-pollution-text");
@@ -1614,33 +1874,38 @@ function showSwitchPollutionModal(previousIdentity, newIdentity) {
       });
 
       // Set up send button - just sends the message, no identity injection
-      modal.querySelector("#switch-send-btn").addEventListener("click", async () => {
-        const finalMessage = textarea.value.trim();
-        if (!finalMessage) {
-          alert("Please enter a pollution message or cancel.");
-          return;
-        }
+      modal
+        .querySelector("#switch-send-btn")
+        .addEventListener("click", async () => {
+          const finalMessage = textarea.value.trim();
+          if (!finalMessage) {
+            alert("Please enter a pollution message or cancel.");
+            return;
+          }
 
-        console.log("Privacy Guard: Sending pollution message");
+          console.log("Privacy Guard: Sending pollution message");
 
-        // Disable buttons during sending
-        modal.querySelector("#switch-send-btn").disabled = true;
-        modal.querySelector("#switch-send-btn").textContent = "Sending...";
+          // Disable buttons during sending
+          modal.querySelector("#switch-send-btn").disabled = true;
+          modal.querySelector("#switch-send-btn").textContent = "Sending...";
 
-        // Send the pollution message
-        const sendResult = await sendMessageToChatApp(finalMessage);
+          // Send the pollution message
+          const sendResult = await sendMessageToChatApp(finalMessage);
 
-        if (sendResult.success) {
-          console.log("Privacy Guard: Pollution message sent successfully");
-          modal.remove();
-        } else {
-          console.error("Privacy Guard: Failed to send pollution message:", sendResult.error);
-          modal.querySelector("#switch-send-btn").disabled = false;
-          modal.querySelector("#switch-send-btn").textContent = "Send";
-          alert("Failed to send message. Please try again.");
-        }
-      });
-    }
+          if (sendResult.success) {
+            console.log("Privacy Guard: Pollution message sent successfully");
+            modal.remove();
+          } else {
+            console.error(
+              "Privacy Guard: Failed to send pollution message:",
+              sendResult.error,
+            );
+            modal.querySelector("#switch-send-btn").disabled = false;
+            modal.querySelector("#switch-send-btn").textContent = "Send";
+            alert("Failed to send message. Please try again.");
+          }
+        });
+    },
   );
 }
 
@@ -1649,10 +1914,15 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", () => {
     monitorChatGPTInput();
     setupResponseMonitoring();
+    // Inject Janus buttons into existing messages after a short delay
+    // (to ensure the DOM is fully loaded)
+    setTimeout(injectJanusButtonsToExistingMessages, 1000);
   });
 } else {
   monitorChatGPTInput();
   setupResponseMonitoring();
+  // Inject Janus buttons into existing messages after a short delay
+  setTimeout(injectJanusButtonsToExistingMessages, 1000);
 }
 
 console.log("Privacy Guard: Content script loaded for ChatGPT");

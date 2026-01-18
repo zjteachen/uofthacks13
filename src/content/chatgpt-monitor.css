@@ -569,3 +569,36 @@
 .no-pollution-state p {
   margin: 0;
 }
+
+/* ========================================
+   Janus Analyze Button
+   ======================================== */
+
+.janus-analyze-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #8B5CF6;
+  transition: all 0.15s ease;
+}
+
+.janus-analyze-btn:hover {
+  background: rgba(139, 92, 246, 0.15);
+  color: #A78BFA;
+}
+
+.janus-analyze-btn:active {
+  background: rgba(139, 92, 246, 0.25);
+  transform: scale(0.95);
+}
+
+.janus-analyze-btn svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
