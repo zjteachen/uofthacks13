@@ -59,6 +59,21 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         });
       });
     return true;
+  } else if (request.type === "checkContextNeeded") {
+    console.log("Background: Checking if prompt needs context");
+    checkContextNeededHandler(request.prompt, request.identity)
+      .then((result) => {
+        console.log("Background: Context check complete, sending response");
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Context check error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      });
+    return true;
   } else if (request.type === "generateCombinedPollutionMessage") {
     console.log("Background: Generating combined pollution message");
     console.log("toDeny:", request.toDeny);
@@ -351,6 +366,157 @@ Return ONLY the rewritten message text, nothing else.`,
   } catch (error) {
     console.error("Rewrite error:", error);
     throw error;
+  }
+}
+
+// Check if a prompt needs context from the identity and return augmented prompt if needed
+// Called via chrome.runtime.onMessage from content script
+async function checkContextNeededHandler(prompt: string, identity: any) {
+  try {
+    if (!identity || !identity.characteristics || identity.characteristics.length === 0) {
+      console.log("Background: No identity characteristics, skipping context check");
+      return { needsContext: false, augmentedPrompt: prompt };
+    }
+
+    // Get Gemini API key - try storage first, then env variable
+    let geminiApiKey = await new Promise<string | null>((resolve) => {
+      chrome.storage.local.get(['geminiApiKey'], (result) => {
+        resolve(result.geminiApiKey || null);
+      });
+    });
+
+    // Fall back to env variable if not in storage
+    if (!geminiApiKey) {
+      geminiApiKey = import.meta.env.VITE_GEMINI_API || import.meta.env.VITE_GEMINI_API_KEY || null;
+    }
+
+    if (!geminiApiKey) {
+      console.log("Background: No Gemini API key found (checked storage and env), skipping context check");
+      return { needsContext: false, augmentedPrompt: prompt };
+    }
+
+    console.log("Background: Gemini API key found, checking context need...");
+
+    // Build the characteristics list
+    const characteristicsList = identity.characteristics
+      .map((c: any) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+
+    const summaryText = identity.summary || "";
+
+    const analysisPrompt = `You are an AI assistant helping maintain consistent identity context in conversations.
+
+USER'S IDENTITY PROFILE: "${identity.name}"
+${summaryText ? `Summary: ${summaryText}` : ""}
+
+Identity Characteristics:
+${characteristicsList}
+
+USER'S PROMPT:
+"${prompt}"
+
+TASK: Analyze if this prompt would benefit from having identity context added. The goal is to ensure the AI responds in a way that's consistent with who the user is presenting as.
+
+Consider adding context if:
+1. The prompt asks for personalized advice, recommendations, or opinions
+2. The prompt involves activities, preferences, or decisions that should reflect the identity
+3. The prompt asks about "me", "my", "I" without establishing who that is
+4. The response quality would improve by knowing relevant identity details
+
+Do NOT add context if:
+1. The prompt is purely factual/informational (e.g., "What is the capital of France?")
+2. The prompt is about coding, math, or technical topics that don't need personal context
+3. The prompt already contains sufficient context
+4. Adding identity would be irrelevant or awkward
+
+If context IS needed, select ONLY the relevant characteristics that apply to this specific prompt. Don't include everything - be selective.
+
+Return a JSON object with:
+{
+  "needsContext": true/false,
+  "reason": "brief explanation",
+  "relevantCharacteristics": ["characteristic1", "characteristic2"] // only if needsContext is true
+}
+
+Return ONLY the JSON object, nothing else.`;
+
+    console.log("Background: Calling Gemini to check context need...");
+    
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: analysisPrompt }] }],
+          generationConfig: {
+            maxOutputTokens: 300,
+            temperature: 0.3,
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error("Background: Gemini API error:", error);
+      return { needsContext: false, augmentedPrompt: prompt };
+    }
+
+    const data = await response.json();
+    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+    
+    console.log("Background: Gemini response:", responseText);
+
+    // Parse the JSON response
+    let analysis;
+    try {
+      const jsonContent = responseText.replace(/```json\n?|\n?```/g, "").trim();
+      analysis = JSON.parse(jsonContent);
+    } catch (e) {
+      console.error("Background: Failed to parse Gemini response:", e);
+      return { needsContext: false, augmentedPrompt: prompt };
+    }
+
+    if (!analysis.needsContext) {
+      return { needsContext: false, augmentedPrompt: prompt };
+    }
+
+    // Build the context prefix with only relevant characteristics
+    const relevantChars = analysis.relevantCharacteristics || [];
+    let selectedCharacteristics = identity.characteristics.filter((c: any) =>
+      relevantChars.some((r: string) => 
+        c.name.toLowerCase().includes(r.toLowerCase()) || 
+        r.toLowerCase().includes(c.name.toLowerCase()) ||
+        c.value.toLowerCase().includes(r.toLowerCase())
+      )
+    );
+
+    // If no matches found but Gemini said context is needed, use all characteristics
+    if (selectedCharacteristics.length === 0) {
+      console.log("Background: No exact matches, using all characteristics");
+      selectedCharacteristics = identity.characteristics;
+    }
+
+    const contextPrefix = `(For context about me: ${selectedCharacteristics
+      .map((c: any) => `${c.name} is ${c.value}`)
+      .join(", ")}.) `;
+
+    const augmentedPrompt = contextPrefix + prompt;
+
+    console.log("Background: Augmented prompt with context");
+    return { 
+      needsContext: true, 
+      augmentedPrompt,
+      reason: analysis.reason,
+      addedContext: contextPrefix
+    };
+
+  } catch (error) {
+    console.error("Background: Context check error:", error);
+    return { needsContext: false, augmentedPrompt: prompt };
   }
 }
 
