@@ -1,8 +1,8 @@
 // ==========================================
 // FEATURE TOGGLES (for testing/debugging)
 // ==========================================
-const ENABLE_INPUT_MONITORING = false; // Monitor outgoing messages for personal info
-const ENABLE_RESPONSE_MONITORING = false; // Monitor AI responses for privacy violations
+const ENABLE_INPUT_MONITORING = true; // Monitor outgoing messages for personal info
+const ENABLE_RESPONSE_MONITORING = true; // Monitor AI responses for privacy violations
 const ENABLE_VERBOSE_LOGGING = false; // Reduce console spam when false
 
 // Store the current textarea being monitored
@@ -18,8 +18,11 @@ console.log(
 
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'injectIdentity') {
-    console.log("Privacy Guard: Injecting identity from popup:", request.identity?.name);
+  if (request.type === "injectIdentity") {
+    console.log(
+      "Privacy Guard: Injecting identity from popup:",
+      request.identity?.name,
+    );
     injectIdentityContext(request.identity);
     sendResponse({ success: true });
   }
@@ -28,11 +31,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Auto-inject selected identity on new chat page
 async function autoInjectIdentityOnPageLoad() {
   // Wait a bit for the page to stabilize
-  await new Promise(r => setTimeout(r, 1000));
-  
+  await new Promise((r) => setTimeout(r, 1000));
+
   const identity = await getSelectedIdentity();
   if (identity) {
-    console.log("Privacy Guard: Auto-injecting identity on new chat:", identity.name);
+    console.log(
+      "Privacy Guard: Auto-injecting identity on new chat:",
+      identity.name,
+    );
     injectIdentityContext(identity);
   }
 }
@@ -45,30 +51,32 @@ function injectIdentityContext(identity) {
   }
 
   const characteristics = identity.characteristics || [];
-  const prompt = identity.prompt || '';
-  
+  const prompt = identity.prompt || "";
+
   // Build context message
   let contextMessage = `You are roleplaying as ${identity.name}.`;
   if (characteristics.length > 0) {
     // Extract values from characteristic objects (they have id, name, value)
-    const charTexts = characteristics.map(char => {
-      if (typeof char === 'string') return char;
-      if (char && char.value) return char.value;
-      if (char && char.name) return char.name;
-      return '';
-    }).filter(c => c && c.trim());
-    
+    const charTexts = characteristics
+      .map((char) => {
+        if (typeof char === "string") return char;
+        if (char && char.value) return char.value;
+        if (char && char.name) return char.name;
+        return "";
+      })
+      .filter((c) => c && c.trim());
+
     if (charTexts.length > 0) {
-      contextMessage += ` Key characteristics: ${charTexts.join(', ')}.`;
+      contextMessage += ` Key characteristics: ${charTexts.join(", ")}.`;
     }
   }
   if (prompt) {
     contextMessage += ` ${prompt}`;
   }
-  
+
   // Find the input field
   const input = findInput();
-  
+
   if (input) {
     console.log("Privacy Guard: Found input element, injecting...");
     // Set the text
@@ -78,14 +86,14 @@ function injectIdentityContext(identity) {
       input.textContent = contextMessage;
       input.innerText = contextMessage;
     }
-    
+
     // Trigger input event to update the UI
-    const event = new Event('input', { bubbles: true });
+    const event = new Event("input", { bubbles: true });
     input.dispatchEvent(event);
-    
+
     // Focus the input
     input.focus();
-    
+
     console.log("Privacy Guard: Injected identity context");
   } else {
     console.log("Privacy Guard: Could not find input to inject identity");
@@ -100,7 +108,7 @@ function findInput() {
     'div[contenteditable="true"][data-testid="chat-input"]',
     "div[data-inner-editor-container]",
     'div[contenteditable="true"][role="textbox"]',
-    "[contenteditable='true']"
+    "[contenteditable='true']",
   ];
 
   for (const selector of selectors) {
