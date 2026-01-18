@@ -63,6 +63,18 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     console.log("Background: Generating combined pollution message");
     console.log("toDeny:", request.toDeny);
     console.log("toPollute:", request.toPollute);
+    addNoiseToContext(request.toDeny, request.toPollute)
+      .then((result) => {
+        console.log("Resulting adverserial message:", result);
+        sendResponse({ success: true, data: result });
+      })
+      .catch((error) => {
+        console.error("Background: Violation detection error:", error);
+        sendResponse({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      });
     //     generateCombinedPollutionMessage(request.toDeny, request.toPollute)
     //       .then((result) => {
     //         console.log("Background: Pollution message generated");
@@ -210,39 +222,35 @@ async function detectPrivacyViolationsInResponse(
   identity: any,
 ) {
   try {
+    const characteristicsList = identity.characteristics
+      .map((c: any) => `- ${c.name}: ${c.value}`)
+      .join("\n");
+
     console.log("responseText", responseText);
     console.log("identity", identity);
-    const mockI = [
-      "Has unstable health.",
-      "Attends University of Waterloo.",
-      "Likes to eat curry.",
-    ];
 
-    const prompt = `Role: You are a Privacy Audit Specialist. Your task is to compare a provided "Authorized Identity" against a "Host LLM Message" to detect unauthorized data collection or inferences.
+    const prompt = `You are a privacy auditor. Analyze the AI assistant's response to detect if it reveals that it KNOWS information about the user that goes BEYOND their allowed privacy profile.
 
-Inputs:
+PRIVACY PROFILE: "${identity.name}"
+Information the user has chosen to share:
+${characteristicsList}
 
-    Authorized Identity: A list of strings representing facts the user has explicitly shared with the AI.
+AI RESPONSE TO ANALYZE:
+${responseText}
 
-    Host LLM Message: The response received from the third-party AI.
+Your task: Identify any statements where the AI demonstrates knowledge of user information that is:
+1. MORE SPECIFIC than what's in the profile (e.g., profile says "Canada" but AI mentions "Toronto")
+2. NOT COVERED by any characteristic in the profile (e.g., AI mentions user's email but no email in profile)
+3. INFERRED beyond what was explicitly shared (e.g., AI assumes user's age from context)
 
-Guidelines for Detection:
+Return a JSON array of violations. Each item must have:
+- "knownInfo": what the AI claims to know (exact quote or paraphrase)
+- "category": "location", "personal_detail", "interest", "behavior", "relationship", etc.
+- "reason": why this exceeds the allowed profile
+- "severity": "high" (specific identifiers), "medium" (detailed inference), "low" (vague assumption)
 
-    Semantic Matching: Do NOT flag information that is semantically identical to the Identity. (e.g., If Identity says "enjoys hiking" and Message says "since you like being outdoors," this is NOT a leak).
-
-    Information Escalation: DO flag information that is more specific or granular than the Identity. (e.g., If Identity says "lives in New York" and Message says "Your local weather in Brooklyn is...", flag "Specific location: Brooklyn").
-
-    Inferred Traits: Flag any psychological profiling, socio-economic status,  personal habits or any other information related to the user that the LLM mentions that are not explicitly in the Identity.
-
-Output Format: > Provide a JSON list of strings. Each string should describe the specific piece of unauthorized information detected. If no leaks are found, return an empty list [].
-
-Data to Analyze:
-
-    Identity: ${mockI}
-
-    Host LLM Message: """${responseText}"""
-
-Return ONLY the JSON array, nothing else. If truly nothing sensitive, return []`;
+Return [] if the AI only references information within the allowed profile bounds.
+Return ONLY the JSON array, nothing else.`;
     console.log("Prompt for information flagging: ", prompt);
 
     const completion = await openai.chat.completions.create({
@@ -335,25 +343,57 @@ Return ONLY the rewritten message text, nothing else.`,
     throw error;
   }
 }
-/*
+
 async function addNoiseToContext(
   denials: any[],
   pollutives: any[],
 ): Promise<any> {
-  // create prompt
-  const prompt = `
+  try {
+    console.log("Denials", denials);
+    console.log("Pollutives", pollutives);
+
+    // Build the input array with knownInfo and strategy
+    const inputItems = [
+      ...denials.map((d) => ({ knownInfo: d.knownInfo, strategy: "denial" })),
+      ...pollutives.map((p) => ({
+        knownInfo: p.knownInfo,
+        strategy: "pollution",
+      })),
+    ];
+
+    console.log("Input items for pollution:", inputItems);
+
+    const prompt = `
 Role: You are a Privacy Obfuscation Engine. Your goal is to generate a natural-sounding message to send to a third-party AI to "clean" or "pollute" the current conversation context based on specific privacy triggers.
 
-Input: A list of objects containing {I,J}, where I is the sensitive information to be scrubbed/denied, and J is the strategy.
+Input: A list of objects containing {knownInfo, strategy}, where knownInfo is the sensitive information that the third-party is aware of to be scrubbed/denied, and the strategy is one of "denial", "pollution":
 
-    Strategy 1 (Deny): Firmly state that I is incorrect or irrelevant and should be disregarded.
+    denial: Firmly state that knownInfo is incorrect or irrelevant and should be disregarded.
 
-    Strategy 2 (Pollute): Contradict I by asserting a false preference or fact J to create "noise" in the user profile.
+    pollution: Contradict knownInfo by asserting a false preference or alternative fact to create "noise" in the user profile and replace the knownInfo in the third-party LLM's context.
 
-Task: Combine all provided {I,J} pairs into a single, cohesive paragraph. The tone should be polite but firm, as if the user is correcting a misunderstanding or clarifying their current needs. Do not mention that you are an AI or that this is a "strategy."
-
-Current Data to Process: {{LIST_OF_OBJECTS}}
+Task: Combine the results from all provided objects into a single, cohesive paragraph. The tone should be polite but firm, as if the user is correcting a misunderstanding or clarifying their current needs. Do not mention that you are an AI or that this is a "strategy."
 
 Output: (A single message ready to be sent to the host LLM).`;
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: prompt },
+        {
+          role: "user",
+          content: JSON.stringify(inputItems),
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    });
+
+    const content = completion.choices[0].message.content?.trim() || "[]";
+    console.log("Background: Violation detection response received");
+
+    return content;
+  } catch (error) {
+    console.error("Background: Violation detection error:", error);
+    throw error;
+  }
 }
-*/

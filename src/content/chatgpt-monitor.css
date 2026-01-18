@@ -437,3 +437,32 @@
   display: flex;
   flex-direction: column;
 }
+
+/* ========================================
+   Pollution Confirmation Modal
+   ======================================== */
+
+/* Editable message textarea */
+.pollution-message-textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 12px;
+  background: #3e3e3e;
+  border: 1px solid #565869;
+  border-radius: 8px;
+  color: #ececec;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  margin: 12px 0;
+}
+
+.pollution-message-textarea:focus {
+  outline: none;
+  border-color: #19c37d;
+}
+
+.pollution-message-textarea::placeholder {
+  color: #a0a0a8;
+}

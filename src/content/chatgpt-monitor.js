@@ -19,6 +19,7 @@ console.log(
 let lastProcessedMessageId = null;
 let processingResponse = false;
 let responseObserver = null; // Track the observer to prevent duplicates
+let currentChatUrl = window.location.href; // Track current chat to detect navigation
 
 // Fetch the selected identity from chrome storage
 async function getSelectedIdentity() {
@@ -623,6 +624,127 @@ function showContextPollutionModal(violations, identity) {
   });
 }
 
+// ==========================================
+// CHAT MESSAGE SENDING
+// ==========================================
+
+// Send a message to the chat application (ChatGPT, Gemini, etc.)
+// This is a general-purpose function for programmatically sending messages
+async function sendMessageToChatApp(message, options = {}) {
+  const { skipPrivacyCheck = true } = options;
+
+  if (!currentTextarea || !message) {
+    console.error("Privacy Guard: Cannot send message - no textarea found or empty message");
+    return { success: false, error: "No textarea or message" };
+  }
+
+  console.log("Privacy Guard: Sending message to chat app:", message.substring(0, 50) + "...");
+
+  // Set textarea content
+  if (currentTextarea.value !== undefined) {
+    currentTextarea.value = message;
+  } else {
+    currentTextarea.textContent = message;
+    currentTextarea.innerText = message;
+  }
+
+  // Trigger input event to update the UI state
+  currentTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+
+  // Mark as approved to skip privacy check if requested
+  if (skipPrivacyCheck) {
+    approvedMessages.add(hashString(message));
+  }
+
+  // Small delay to let the UI update
+  await new Promise((r) => setTimeout(r, 100));
+
+  // Submit the message
+  if (currentSendButton) {
+    currentSendButton.click();
+    return { success: true };
+  } else if (currentForm) {
+    currentForm.requestSubmit();
+    return { success: true };
+  }
+
+  return { success: false, error: "No send button or form found" };
+}
+
+// ==========================================
+// POLLUTION CONFIRMATION
+// ==========================================
+
+// Show confirmation modal with the generated pollution message
+function showPollutionConfirmationModal(generatedMessage) {
+  return new Promise((resolve) => {
+    // Remove existing modal if present
+    const existingModal = document.getElementById("pollution-confirmation-modal");
+    if (existingModal) {
+      existingModal.remove();
+    }
+
+    const modal = document.createElement("div");
+    modal.id = "pollution-confirmation-modal";
+
+    modal.innerHTML = `
+      <div class="privacy-modal-overlay">
+        <div class="privacy-modal-content">
+          <div class="privacy-modal-header">
+            <h2>📤 Review Correction Message</h2>
+          </div>
+          <div class="privacy-modal-body">
+            <p>The following message will be sent to correct the AI's assumptions:</p>
+            <textarea id="pollution-message-text" class="pollution-message-textarea">${generatedMessage}</textarea>
+            <p class="warning-message">⚠️ You can edit the message above before sending.</p>
+          </div>
+          <div class="privacy-modal-footer">
+            <button id="pollution-confirm-cancel" class="privacy-btn privacy-btn-cancel">Cancel</button>
+            <button id="pollution-confirm-send" class="privacy-btn privacy-btn-rewrite">Send Message</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const textarea = modal.querySelector("#pollution-message-text");
+
+    modal.querySelector("#pollution-confirm-cancel").onclick = () => {
+      console.log("Privacy Guard: User cancelled sending pollution message");
+      modal.remove();
+      resolve({ action: "cancel" });
+    };
+
+    modal.querySelector("#pollution-confirm-send").onclick = () => {
+      const finalMessage = textarea.value.trim();
+      console.log("Privacy Guard: User confirmed sending pollution message");
+      modal.remove();
+      resolve({ action: "send", message: finalMessage });
+    };
+  });
+}
+
+// Generate combined pollution message via background script
+async function generatePollutionMessage(toDeny, toPollute) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "generateCombinedPollutionMessage",
+        toDeny,
+        toPollute,
+      },
+      (response) => {
+        if (response && response.success) {
+          resolve(response.data);
+        } else {
+          reject(new Error(response?.error || "Failed to generate message"));
+        }
+      }
+    );
+  });
+}
+
 // Analyze assistant response for privacy violations
 async function analyzeAssistantResponse(responseText) {
   const identity = await getSelectedIdentity();
@@ -644,24 +766,42 @@ async function analyzeAssistantResponse(responseText) {
     identity,
   );
 
-  console.log(
-    "Privacy Guard: Found",
-    violations.length,
-    "privacy violations in response",
-  );
+  console.log("Privacy Guard: Found Violations", violations);
 
   if (violations.length > 0) {
     const result = await showContextPollutionModal(violations, identity);
     console.log("Privacy Guard: User action:", result.action);
-    if (result.action == "submit") {
-      const toDeny = result.toDeny;
-      const toPollute = result.toPollute;
 
-      chrome.runtime.sendMessage({
-        type: "generateCombinedPollutionMessage",
-        toDeny,
-        toPollute,
-      });
+    if (result.action === "submit") {
+      const { toDeny, toPollute } = result;
+
+      // Skip if nothing to process
+      if (toDeny.length === 0 && toPollute.length === 0) {
+        console.log("Privacy Guard: No items to deny or pollute");
+        return;
+      }
+
+      try {
+        // Generate the pollution message
+        console.log("Privacy Guard: Generating pollution message...");
+        const generatedMessage = await generatePollutionMessage(toDeny, toPollute);
+        console.log("Privacy Guard: Generated message:", generatedMessage);
+
+        // Show confirmation modal
+        const confirmResult = await showPollutionConfirmationModal(generatedMessage);
+
+        if (confirmResult.action === "send") {
+          // Send the message to the chat
+          const sendResult = await sendMessageToChatApp(confirmResult.message);
+          if (sendResult.success) {
+            console.log("Privacy Guard: Pollution message sent successfully");
+          } else {
+            console.error("Privacy Guard: Failed to send message:", sendResult.error);
+          }
+        }
+      } catch (error) {
+        console.error("Privacy Guard: Error in pollution flow:", error);
+      }
     }
   }
 }
@@ -687,6 +827,43 @@ function setupResponseMonitoring() {
 
   responseObserver = new MutationObserver(async (mutations) => {
     if (processingResponse) return;
+
+    // Check if URL changed (user navigated to different chat)
+    const newUrl = window.location.href;
+    if (newUrl !== currentChatUrl) {
+      console.log("Privacy Guard: Chat changed, resetting state");
+      currentChatUrl = newUrl;
+      lastProcessedMessageId = null;
+      return; // Don't process - this is just a chat switch
+    }
+
+    // Check if any mutation is actually adding/changing content (not just navigation)
+    const hasRelevantMutation = mutations.some((mutation) => {
+      // Check for added nodes that are or contain assistant messages
+      if (mutation.type === "childList" && mutation.addedNodes.length > 0) {
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            const el = node;
+            if (
+              el.matches?.("[data-message-author-role='assistant']") ||
+              el.querySelector?.("[data-message-author-role='assistant']")
+            ) {
+              return true;
+            }
+          }
+        }
+      }
+      // Check for character data changes (streaming text)
+      if (mutation.type === "characterData") {
+        return true;
+      }
+      return false;
+    });
+
+    if (!hasRelevantMutation) {
+      return;
+    }
+
     processingResponse = true;
 
     // Find all assistant messages
@@ -706,6 +883,23 @@ function setupResponseMonitoring() {
 
     // Skip if already processed
     if (messageId === lastProcessedMessageId) {
+      processingResponse = false;
+      return;
+    }
+
+    // Capture initial content to verify it's actually streaming (new response)
+    const initialContent = latestMessage.textContent || "";
+
+    // Wait a bit and check if content is changing (streaming)
+    await new Promise((r) => setTimeout(r, 300));
+    const contentAfterWait = latestMessage.textContent || "";
+
+    // If content hasn't changed and message was already complete, skip (likely a chat switch)
+    if (initialContent === contentAfterWait && initialContent.length > 100) {
+      // Content is static and substantial - likely an old message from chat switch
+      if (ENABLE_VERBOSE_LOGGING) {
+        console.log("Privacy Guard: Skipping static message (likely chat switch)");
+      }
       processingResponse = false;
       return;
     }
