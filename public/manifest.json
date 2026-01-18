@@ -1,12 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "Privacy Guard for ChatGPT",
+  "name": "Janus",
   "version": "1.0.0",
-  "description": "Detects and warns about personal information before sharing on ChatGPT",
-  "icons": {},
+  "description": "Manage multiple identities when interacting with LLMs - protect your privacy with persona switching",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_icon": {}
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
   "options_page": "options.html",
   "permissions": ["storage"],
