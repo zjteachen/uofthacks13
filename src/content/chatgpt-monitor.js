@@ -529,81 +529,6 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
     return { proceed: true, text };
   }
 
-  // Check for context augmentation (runs even if input monitoring is disabled)
-  if (ENABLE_CONTEXT_AUGMENTATION && !contextAugmentedMessages.has(textHash)) {
-    const identity = await getSelectedIdentity();
-
-    if (
-      identity &&
-      identity.characteristics &&
-      identity.characteristics.length > 0
-    ) {
-      console.log("Privacy Guard: Checking if prompt needs context...");
-
-      const contextResult = await checkAndAugmentContext(text, identity);
-
-      if (
-        contextResult.needsContext &&
-        contextResult.augmentedPrompt !== text
-      ) {
-        console.log("Privacy Guard: Adding context to prompt");
-        console.log("Privacy Guard: Reason:", contextResult.reason);
-        console.log(
-          "Privacy Guard: Added context:",
-          contextResult.addedContext,
-        );
-
-        // Update textarea with augmented text
-        if (textarea.value !== undefined) {
-          textarea.value = contextResult.augmentedPrompt;
-        } else {
-          textarea.textContent = contextResult.augmentedPrompt;
-          textarea.innerText = contextResult.augmentedPrompt;
-        }
-
-        // Trigger input event to update the app's internal state
-        const inputEvent = new Event("input", { bubbles: true });
-        textarea.dispatchEvent(inputEvent);
-
-        // Mark as augmented so we don't augment again
-        const augmentedHash = hashString(contextResult.augmentedPrompt);
-        contextAugmentedMessages.add(augmentedHash);
-        // NOTE: Don't add to approvedMessages here - let privacy check run on augmented text
-
-        // Continue to privacy check with the augmented text
-        // Don't auto-submit yet - let it fall through to privacy monitoring
-      }
-    }
-  }
-
-  // Skip privacy monitoring if input monitoring is disabled
-  if (!ENABLE_INPUT_MONITORING) {
-    // Mark as approved so we don't check again when we click submit
-    approvedMessages.add(textHash);
-
-    // Auto-submit since we already prevented the default event
-    if (shouldAutoSubmit) {
-      isProgrammaticSubmit = true;
-      setTimeout(() => {
-        // Find button fresh each time
-        const sendBtn =
-          document.querySelector('button[aria-label="Send prompt"]') ||
-          document.querySelector("button.send-button") ||
-          document.querySelector('button[data-testid="send-button"]');
-        if (sendBtn) {
-          sendBtn.click();
-        } else if (currentForm) {
-          currentForm.requestSubmit();
-        }
-        isProgrammaticSubmit = false;
-      }, 50);
-    }
-    return {
-      proceed: true,
-      text: textarea.value || textarea.textContent || "",
-    };
-  }
-
   // Gather context: selected identity and chat history
   const identity = await getSelectedIdentity();
   const chatHistory = extractChatHistory();
@@ -616,64 +541,101 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
     "messages",
   );
 
-  // Show modal immediately, detection happens inside with context
-  const result = await createWarningModal(
-    text,
-    textarea,
-    identity,
-    chatHistory,
-  );
+  // Track the working text (may be modified by privacy rewrite)
+  let workingText = text;
 
-  console.log("Privacy Guard: User decision:", result.action);
-  console.log("Privacy Guard: User decision:", result.action);
+  // STEP 1: Privacy monitoring FIRST (before context augmentation)
+  // This ensures we remove personal info from the original message,
+  // not from the augmented message which would remove the injected context
+  if (ENABLE_INPUT_MONITORING) {
+    // Show modal immediately, detection happens inside with context
+    const result = await createWarningModal(
+      text,
+      textarea,
+      identity,
+      chatHistory,
+    );
 
-  if (result.action === "cancel") {
-    return { proceed: false };
-  } else if (result.action === "proceed") {
-    // User wants to send original message
-    approvedMessages.add(textHash);
+    console.log("Privacy Guard: User decision:", result.action);
 
-    if (shouldAutoSubmit) {
-      setTimeout(() => {
-        if (currentSendButton) {
-          currentSendButton.click();
-        } else if (currentForm) {
-          currentForm.requestSubmit();
-        }
-      }, 50);
+    if (result.action === "cancel") {
+      return { proceed: false };
+    } else if (result.action === "rewrite") {
+      // User chose to rewrite - use the cleaned text
+      workingText = result.text;
+      console.log("Privacy Guard: Using rewritten text for context augmentation");
     }
-
-    return { proceed: true, text: result.text };
-  } else if (result.action === "rewrite") {
-    // Mark rewritten message as approved to skip re-checking
-    const rewrittenHash = hashString(result.text);
-    approvedMessages.add(rewrittenHash);
-
-    // Update textarea with rewritten text
-    if (textarea.value !== undefined) {
-      textarea.value = result.text;
-    } else {
-      textarea.textContent = result.text;
-      textarea.innerText = result.text;
-    }
-
-    // Trigger input event to update ChatGPT's internal state
-    const inputEvent = new Event("input", { bubbles: true });
-    textarea.dispatchEvent(inputEvent);
-
-    // Auto-submit the rewritten message
-    if (shouldAutoSubmit) {
-      setTimeout(() => {
-        if (currentSendButton) {
-          currentSendButton.click();
-        } else if (currentForm) {
-          currentForm.requestSubmit();
-        }
-      }, 100);
-    }
-
-    return { proceed: true, text: result.text };
+    // If "proceed", workingText stays as original
   }
+
+  // STEP 2: Context augmentation AFTER privacy check
+  // This adds context to the cleaned message (or original if no rewrite)
+  const workingTextHash = hashString(workingText);
+  if (ENABLE_CONTEXT_AUGMENTATION && !contextAugmentedMessages.has(workingTextHash)) {
+    if (
+      identity &&
+      identity.characteristics &&
+      identity.characteristics.length > 0
+    ) {
+      console.log("Privacy Guard: Checking if prompt needs context...");
+
+      const contextResult = await checkAndAugmentContext(workingText, identity);
+
+      if (
+        contextResult.needsContext &&
+        contextResult.augmentedPrompt !== workingText
+      ) {
+        console.log("Privacy Guard: Adding context to prompt");
+        console.log("Privacy Guard: Reason:", contextResult.reason);
+        console.log(
+          "Privacy Guard: Added context:",
+          contextResult.addedContext,
+        );
+
+        workingText = contextResult.augmentedPrompt;
+
+        // Mark as augmented so we don't augment again
+        const augmentedHash = hashString(workingText);
+        contextAugmentedMessages.add(augmentedHash);
+      }
+    }
+  }
+
+  // STEP 3: Update textarea with final text and submit
+  const finalTextHash = hashString(workingText);
+  approvedMessages.add(finalTextHash);
+
+  // Update textarea with final text (rewritten + context augmented)
+  if (textarea.value !== undefined) {
+    textarea.value = workingText;
+  } else {
+    textarea.textContent = workingText;
+    textarea.innerText = workingText;
+  }
+
+  // Trigger input event to update the app's internal state
+  const inputEvent = new Event("input", { bubbles: true });
+  textarea.dispatchEvent(inputEvent);
+
+  // Auto-submit the final message
+  if (shouldAutoSubmit) {
+    isProgrammaticSubmit = true;
+    setTimeout(() => {
+      // Find button fresh each time to avoid stale references
+      const sendBtn =
+        document.querySelector('button[aria-label="Send prompt"]') ||
+        document.querySelector("button.send-button") ||
+        document.querySelector('button[data-testid="send-button"]');
+      if (sendBtn) {
+        sendBtn.click();
+      } else if (currentForm) {
+        currentForm.requestSubmit();
+      }
+      isProgrammaticSubmit = false;
+    }, 100);
+  }
+
+  return { proceed: true, text: workingText };
 }
 
 // ==========================================
