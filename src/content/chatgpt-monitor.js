@@ -113,6 +113,67 @@ function extractChatHistory() {
   return messages;
 }
 
+// Show toast notification
+function showToast(message) {
+  const toast = document.createElement("div");
+  toast.className = "privacy-toast";
+  toast.textContent = message;
+  
+  // Add inline styles
+  Object.assign(toast.style, {
+    position: "fixed",
+    bottom: "20px",
+    right: "20px",
+    backgroundColor: "#10a37f",
+    color: "white",
+    padding: "12px 20px",
+    borderRadius: "8px",
+    fontSize: "14px",
+    fontWeight: "500",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+    zIndex: "10001",
+    animation: "slideIn 0.3s ease-out",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+  });
+  
+  // Add animation keyframes if not already added
+  if (!document.getElementById("privacy-toast-styles")) {
+    const style = document.createElement("style");
+    style.id = "privacy-toast-styles";
+    style.textContent = `
+      @keyframes slideIn {
+        from {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      @keyframes slideOut {
+        from {
+          transform: translateX(0);
+          opacity: 1;
+        }
+        to {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  document.body.appendChild(toast);
+  
+  // Remove after 3 seconds with animation
+  setTimeout(() => {
+    toast.style.animation = "slideOut 0.3s ease-in";
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
 // Detect personal information using AI (via background service worker)
 async function detectPersonalInfoWithAI(
   text,
@@ -294,10 +355,11 @@ function createWarningModal(
       "items",
     );
 
-    // If nothing detected, automatically proceed
+    // If nothing detected, show toast and automatically proceed
     if (detectedInfo.length === 0) {
       console.log("Privacy Guard: No sensitive info detected, auto-proceeding");
       modal.remove();
+      showToast("✓ No sensitive information detected");
       resolve({ action: "proceed", text: originalText });
       return;
     }
@@ -961,6 +1023,56 @@ async function generatePollutionMessage(toDeny, toPollute) {
   });
 }
 
+// Update fake identity characteristics from pollution data
+async function updateFakeIdentityFromPollution(identityId, toPollute) {
+  try {
+    console.log("Privacy Guard: Updating fake identity from pollution data");
+    
+    // Get current identities
+    const result = await chrome.storage.sync.get(["identities"]);
+    const identities = result.identities || [];
+    
+    // Find the identity
+    const identityIndex = identities.findIndex(i => i.id === identityId);
+    if (identityIndex === -1) {
+      console.error("Privacy Guard: Identity not found");
+      return;
+    }
+    
+    const identity = identities[identityIndex];
+    const existingFakes = identity.fakeCharacteristics || [];
+    
+    // Create map of existing fake characteristics
+    const fakeMap = new Map(existingFakes.map(c => [c.name.toLowerCase(), c]));
+    
+    // Extract characteristics from polluted information
+    toPollute.forEach((violation, idx) => {
+      const charName = violation.category || "Info";
+      const charValue = violation.knownInfo || "";
+      
+      // Add or update fake characteristic
+      const key = charName.toLowerCase();
+      if (!fakeMap.has(key)) {
+        fakeMap.set(key, {
+          id: `fake-pollute-${Date.now()}-${idx}`,
+          name: charName.charAt(0).toUpperCase() + charName.slice(1),
+          value: charValue
+        });
+      }
+    });
+    
+    // Update identity with new fake characteristics
+    identity.fakeCharacteristics = Array.from(fakeMap.values());
+    identities[identityIndex] = identity;
+    
+    // Save back to storage
+    await chrome.storage.sync.set({ identities });
+    console.log("Privacy Guard: Fake identity updated successfully");
+  } catch (error) {
+    console.error("Privacy Guard: Error updating fake identity:", error);
+  }
+}
+
 // Analyze assistant response for privacy violations
 async function analyzeAssistantResponse(responseText) {
   const identity = await getSelectedIdentity();
@@ -1011,6 +1123,11 @@ async function analyzeAssistantResponse(responseText) {
           await showPollutionConfirmationModal(generatedMessage);
 
         if (confirmResult.action === "send") {
+          // Update fake identity with polluted information
+          if (toPollute.length > 0 && identity) {
+            await updateFakeIdentityFromPollution(identity.id, toPollute);
+          }
+
           // Send the message to the chat
           const sendResult = await sendMessageToChatApp(confirmResult.message);
           if (sendResult.success) {

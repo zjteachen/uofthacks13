@@ -11,6 +11,7 @@ export interface Identity {
   prompt: string;
   summary: string;
   characteristics: Characteristic[];
+  fakeCharacteristics: Characteristic[];
   createdAt: number;
 }
 
