@@ -33,6 +33,7 @@
         "https://*.claude.ai/*"
       ],
       "js": ["content/chatgpt-monitor.js"],
+      "css": ["content/chatgpt-monitor.css"],
       "run_at": "document_end"
     }
   ]
