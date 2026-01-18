@@ -36,11 +36,7 @@ try {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (!isExtensionValid()) return;
 
-    if (request.type === 'injectIdentity') {
-      console.log("Privacy Guard: Injecting identity from popup:", request.identity?.name);
-      injectIdentityContext(request.identity);
-      sendResponse({ success: true });
-    } else if (request.type === "injectIdentityWithPollution") {
+    if (request.type === "injectIdentityWithPollution") {
       console.log(
         "Privacy Guard: Identity switch with pollution requested:",
         request.previousIdentity?.name,
@@ -53,99 +49,6 @@ try {
   });
 } catch (e) {
   console.log("Privacy Guard: Could not add message listener:", e.message);
-}
-
-// Auto-inject selected identity on new chat page
-async function autoInjectIdentityOnPageLoad() {
-  // Wait a bit for the page to stabilize
-  await new Promise((r) => setTimeout(r, 1000));
-
-  const identity = await getSelectedIdentity();
-  if (identity) {
-    console.log(
-      "Privacy Guard: Auto-injecting identity on new chat:",
-      identity.name,
-    );
-    injectIdentityContext(identity);
-  }
-}
-
-// Inject identity description into the LLM context
-function injectIdentityContext(identity) {
-  if (!identity) {
-    console.log("Privacy Guard: No identity provided");
-    return;
-  }
-
-  const characteristics = identity.characteristics || [];
-  const summary = identity.summary || '';
-  
-  // Build context message from characteristics only
-  let contextParts = [];
-  
-  if (characteristics.length > 0) {
-    // Format characteristics as "Name: Value" pairs
-    const charTexts = characteristics.map(char => {
-      if (typeof char === 'object' && char.name && char.value) {
-        return `${char.name}: ${char.value}`;
-      }
-      return '';
-    }).filter(c => c && c.trim());
-    
-    if (charTexts.length > 0) {
-      contextParts.push(`[Context: ${charTexts.join('. ')}]`);
-    }
-  } else if (summary) {
-    // Fall back to summary if no characteristics
-    contextParts.push(`[Context: ${summary}]`);
-  }
-  
-  const contextMessage = contextParts.join(' ');
-  
-  // Find the input field
-  const input = findInput();
-
-  if (input) {
-    console.log("Privacy Guard: Found input element, injecting...");
-    // Set the text
-    if (input.value !== undefined) {
-      input.value = contextMessage;
-    } else {
-      input.textContent = contextMessage;
-      input.innerText = contextMessage;
-    }
-
-    // Trigger input event to update the UI
-    const event = new Event("input", { bubbles: true });
-    input.dispatchEvent(event);
-
-    // Focus the input
-    input.focus();
-
-    console.log("Privacy Guard: Injected identity context");
-  } else {
-    console.log("Privacy Guard: Could not find input to inject identity");
-  }
-}
-
-// Helper function to find input (reusable)
-function findInput() {
-  const selectors = [
-    "textarea[data-id]",
-    "#prompt-textarea",
-    'div[contenteditable="true"][data-testid="chat-input"]',
-    "div[data-inner-editor-container]",
-    'div[contenteditable="true"][role="textbox"]',
-    "[contenteditable='true']",
-  ];
-
-  for (const selector of selectors) {
-    const el = document.querySelector(selector);
-    if (el && el.offsetParent !== null) {
-      return el;
-    }
-  }
-  return null;
 }
 
 // Response monitoring state
