@@ -529,26 +529,10 @@ async function interceptSubmission(textarea, shouldAutoSubmit = false) {
         // Mark as augmented so we don't augment again
         const augmentedHash = hashString(contextResult.augmentedPrompt);
         contextAugmentedMessages.add(augmentedHash);
-        approvedMessages.add(augmentedHash);
+        // NOTE: Don't add to approvedMessages here - let privacy check run on augmented text
 
-        // Auto-submit the augmented message
-        if (shouldAutoSubmit) {
-          isProgrammaticSubmit = true;
-          setTimeout(() => {
-            // Find button fresh each time
-            const sendBtn = document.querySelector('button[aria-label="Send prompt"]') ||
-                            document.querySelector('button.send-button') ||
-                            document.querySelector('button[data-testid="send-button"]');
-            if (sendBtn) {
-              sendBtn.click();
-            } else if (currentForm) {
-              currentForm.requestSubmit();
-            }
-            isProgrammaticSubmit = false;
-          }, 100);
-        }
-
-        return { proceed: true, text: contextResult.augmentedPrompt };
+        // Continue to privacy check with the augmented text
+        // Don't auto-submit yet - let it fall through to privacy monitoring
       }
     }
   }
